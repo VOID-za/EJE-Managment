@@ -1,6 +1,5 @@
 import {
   asUserId,
-  can,
   completesTimesheet,
   formAwaits,
   userFullName,
@@ -32,11 +31,10 @@ import {
   loadPayrollForms,
   namesFor,
   oneFormPage,
-  relation,
   submitPayrollForms,
   workingAttendanceDocument,
 } from './payroll-forms';
-import { loadTimesheetDocument } from './timesheets';
+import { loadTimesheetDocument, openEntries } from './timesheets';
 
 /**
  * EACH FORM COMPLETED ON ITS OWN; BOTH SUBMITTED TO THE OFFICE TOGETHER.
@@ -81,10 +79,15 @@ const assertOwnForm = (context: OperationContext, userId: UserId): void => {
   );
 };
 
-/** The person may read these completed forms: their own, or the office's right to read everybody's payroll. */
+/**
+ * MY MONTHLY FORMS IS PERSONAL (FORMS-OWN-1, the owner, 7 November 2026): completed forms awaiting submission,
+ * correction drafts and withdrawn forms are read by their OWNER only — the session's user, never an id in the
+ * request. No role reads another person's (a Senior Tech or the Office included): what the office reviews is what
+ * was SUBMITTED, on EJE Monthly Forms.
+ */
 const assertMayReadForms = (context: OperationContext, userId: UserId): void => {
-  if (context.actor.id === userId || can(context.actor.role, 'timesheets.viewAll')) return;
-  throw refuse('Those forms are not yours.', 'not_permitted', 'Each person reads their own forms; the office reads everybody’s.');
+  if (context.actor.id === userId) return;
+  throw refuse('Those forms are not yours.', 'not_permitted', 'Each person reads their own forms on My Monthly Forms; the office reads what was submitted, on EJE Monthly Forms.');
 };
 
 const assertKind = (kind: string): PayrollDocumentKind => {
@@ -336,10 +339,9 @@ const checkCompletion = async (context: OperationContext, technicianId: string, 
   if (kind === 'timesheet' && !timesheetRequired) {
     throw refuse('You keep no timesheet.', 'timesheet_not_required', 'The Office completes and submits attendance only.');
   }
-  const [state, awaiting, current, names] = await Promise.all([
+  const [state, awaiting, names] = await Promise.all([
     loadPayrollForms(context, technicianId, from, to),
     awaitingOf(context, userId),
-    currentSubmissions(context, person),
     namesFor(context, person, from, to),
   ]);
   const codes: { code: string; message: string; detail: string }[] = [];
@@ -365,18 +367,11 @@ const checkCompletion = async (context: OperationContext, technicianId: string, 
       `Both forms are submitted together, for the same dates: complete this one for ${formatPeriod(other.from, other.to)} too.`,
     );
   }
-  const submitted = [
-    ...current.payroll.map((submission) => ({ from: submission.from, to: submission.to })),
-    ...current.monthly.map((submission) => monthBounds(submission.month)),
-    ...current.periods.map((period) => ({ from: period.from, to: period.to })),
-  ].filter((range) => relation(from, to, range) !== 'apart');
-  if (submitted.length > 0) {
-    add(
-      'payroll_period_submitted',
-      `These dates include forms already submitted to the office (${submitted.map((range) => formatPeriod(range.from, range.to)).join('; ')}).`,
-      'A submitted form is never submitted again. Choose dates that start after it ends.',
-    );
-  }
+  /*
+   * REPEAT-DATES-1 (the owner, 7 November 2026): dates already in a submitted form are allowed. The new form is its
+   * own submission; its timesheet carries only the OPEN lines (`openEntries`), never one already submitted, and the
+   * earlier submission is never touched. Said to the person and to the office (`repeats`), never refused.
+   */
   // Only lines IN these dates: a draft with no date belongs to no form yet.
   const incomplete = (state.timesheet?.incomplete ?? []).filter((line) => line.date !== null);
   if (kind === 'timesheet' && incomplete.length > 0) {
@@ -482,7 +477,7 @@ export const completePayrollForm = async (context: OperationContext, technicianI
   let rendered: { readonly bytes: Uint8Array; readonly pageCount: number };
   if (kind === 'timesheet') {
     const [entries, working, document] = await Promise.all([
-      context.repos.attendance.listEntries(person.id, from, to),
+      openEntries(context, person.id, from, to),
       context.repos.attendance.findWorkingComment(person.id),
       loadTimesheetDocument(context, person.id, from, to, 'working'),
     ]);
@@ -572,7 +567,7 @@ export const withdrawCompletedForm = async (context: OperationContext, technicia
   const person = await findPayrollPerson(context, technicianId);
   // Still exactly as completed (its dates were locked): the draft starts from the very same data.
   if (form.kind === 'timesheet') {
-    const entries = await context.repos.attendance.listEntries(person.id, form.from, form.to);
+    const entries = await openEntries(context, person.id, form.from, form.to);
     const sorted = [...entries].sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
     if (!sameContent(sorted, form.timesheet?.entries ?? [])) {
       throw refuse('Your timesheet changed after it was completed.', 'payroll_form_changed', 'Nothing was withdrawn. Ask the office to look into it.');
@@ -672,7 +667,8 @@ export const submitCompletedForms = async (context: OperationContext, technician
   if (readiness !== 'ready') {
     const recent = awaiting.all.find((form) => form.submissionId !== null);
     const correcting = awaiting.draftOf('timesheet') !== null || awaiting.draftOf('attendance') !== null;
-    throw readiness === 'none' && recent !== undefined && !correcting && awaiting.timesheet === null && awaiting.attendance === null
+    // Nothing newly completed after a submission (for the Office, attendance only): a retry, said as one.
+    throw (readiness === 'none' || (!timesheetRequired && readiness === 'attendance_missing')) && recent !== undefined && !correcting && awaiting.timesheet === null && awaiting.attendance === null
       ? refuse('These forms were already submitted to the office.', 'payroll_already_submitted', 'They are in your history. Nothing was submitted again.')
       : refuse('Both forms must be completed before they are submitted.', `submit_${readiness}`, text);
   }
@@ -686,7 +682,7 @@ export const submitCompletedForms = async (context: OperationContext, technician
     throw refuse('Your attendance changed after it was completed.', 'payroll_form_changed', 'Nothing was submitted. Ask the office to look into it.');
   }
   if (timesheetForm !== null) {
-    const entries = await context.repos.attendance.listEntries(person.id, from, to);
+    const entries = await openEntries(context, person.id, from, to);
     const sorted = [...entries].sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
     if (!sameContent(sorted, timesheetForm.timesheet?.entries ?? [])) {
       throw refuse('Your timesheet changed after it was completed.', 'payroll_form_changed', 'Nothing was submitted. Ask the office to look into it.');
@@ -719,8 +715,8 @@ export const loadCompletedFormPdf = async (
 ): Promise<{ readonly fileName: string; readonly bytes: Uint8Array }> => {
   const form = await context.repos.payroll.findFormCompletion(completionId);
   if (form === null) throw refuse('That completed form does not exist.', 'form_not_found', 'Reload My Monthly Forms.');
-  // Somebody else's is refused exactly like one that does not exist.
-  if (form.userId !== context.actor.id && !can(context.actor.role, 'timesheets.viewAll')) {
+  // Somebody else's is refused exactly like one that does not exist — whoever asks (FORMS-OWN-1).
+  if (form.userId !== context.actor.id) {
     throw refuse('That completed form does not exist.', 'form_not_found', 'Reload My Monthly Forms.');
   }
   const stored = await context.services.storage.getDocument(form.document.storageKey);

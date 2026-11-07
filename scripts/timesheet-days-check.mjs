@@ -152,10 +152,14 @@ await check('lines from before the redesign are on their days, editable; a submi
   const day = await summaryOf(shift(today, -20));
   // v1.7.1: the customers by name, never "2 lines · 2 customers/sites".
   if (/\b\d+ lines?\b|customers?\/sites?/u.test(day) || !/OT 3\.50/u.test(day)) fail(`the earlier day reads "${day}"`);
-  const kept = await summaryOf(shift(today, -30));
-  // Which timesheet holds it, in words — never just "Submitted".
-  if (!/Already in your timesheet .* sent to the office/u.test(kept)) fail(`the submitted day reads "${kept}" on Timesheets`);
-  if ((await page.getByTestId('timesheet-sent-overlap').count()) !== 1) fail('the page does not say the chosen dates reach into a timesheet already sent');
+  // REPEAT-DATES-1: a submitted day is not locked — it says its submitted lines are elsewhere, and takes new ones.
+  const keptDay = page.locator(`[data-testid="timesheet-day"][data-date="${shift(today, -30)}"]`);
+  if ((await keptDay.getByTestId('timesheet-day-also-submitted-badge').count()) !== 1) fail('the submitted day does not say it is also in a submitted timesheet');
+  if (/Already in your timesheet|sent to the office/u.test(await summaryOf(shift(today, -30)))) fail('the submitted day still reads as locked');
+  await openDay(shift(today, -30));
+  await keptDay.getByTestId('timesheet-day-also-submitted').filter({ hasText: 'not in this timesheet' }).waitFor({ timeout: 10000 });
+  if (!(await keptDay.locator('[data-testid^="add-timesheet-line"]').isEnabled())) fail('a submitted day offers no Add line');
+  if ((await page.getByTestId('timesheet-sent-overlap').filter({ hasText: 'That is allowed' }).count()) !== 1) fail('the page does not say repeated dates are allowed');
   for (const line of submitted) {
     if ((await lineById(line.id).count()) > 0) fail(`the submitted line on ${line.date} is on the Timesheets page`);
   }
@@ -404,15 +408,16 @@ await check('a period of a whole year lays out its 366 days, closed', async () =
   return `${days} days in ${Date.now() - started} ms`;
 });
 
-await check('20. Attendance shows no submitted history; My Monthly Forms has the submitted timesheets', async () => {
+await check('20. Attendance shows no submitted history; My Monthly Forms has the submitted timesheets, in its one History', async () => {
   await go('/attendance');
   await page.getByTestId('my-attendance-from').waitFor({ timeout: 20000 });
   for (const gone of ['my-monthly-history', 'timesheet-submissions', 'my-submitted-timesheets', 'timesheet-office']) {
     if ((await page.getByTestId(gone).count()) > 0) fail(`Attendance shows ${gone}`);
   }
   await go('/payroll/mine');
-  await page.getByTestId('my-submitted-timesheets').waitFor({ timeout: 20000 });
-  await page.getByTestId('my-monthly-history').waitFor({ timeout: 20000 });
+  // HISTORY-ONE-1: the one History holds the submitted timesheets; no separate section.
+  await page.locator('[data-testid="my-monthly-history-form"][data-kind="timesheet"]').first().waitFor({ timeout: 20000 });
+  if ((await page.getByTestId('my-submitted-timesheets').count()) !== 0) fail('My Monthly Forms still has a separate submitted-timesheets section');
 });
 
 await check('21. the timesheets submitted before are exactly as they were', async () => {

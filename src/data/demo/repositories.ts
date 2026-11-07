@@ -1604,21 +1604,22 @@ class DemoAttendanceRepository implements AttendanceRepository {
     return Promise.resolve();
   }
 
-  submitPeriod(period: TimesheetPeriod): Promise<TimesheetPeriod | null> {
+  async submitPeriod(period: TimesheetPeriod): Promise<TimesheetPeriod | null> {
     let saved: TimesheetPeriod | null = null;
     this.context.commit((draft) => {
+      // The UNSENT row these dates have, which submitting fills in (0056: one unsent row per person and dates). A
+      // sent row with the same dates is another submission (REPEAT-DATES-1): this one is written beside it.
       const existing = draft.timesheetPeriods.find(
-        (row) => row.userId === period.userId && row.from === period.from && row.to === period.to && (row.supersededAt ?? null) === null,
-      );
-      if (existing !== undefined && existing.submittedAt !== null) return;
-      // As the database's trigger does: a sent period may not overlap another CURRENT one (TS-OVERLAP-1:
-      // the application supersedes those first, in the same unit of work).
-      const overlaps = draft.timesheetPeriods.some(
         (row) =>
-          row !== existing && row.userId === period.userId && row.submittedAt !== null && (row.supersededAt ?? null) === null &&
-          row.from <= period.to && row.to >= period.from,
+          row.userId === period.userId && row.from === period.from && row.to === period.to && row.submittedAt === null && (row.supersededAt ?? null) === null,
       );
-      if (overlaps) throw new Error('timesheet period overlaps a period already sent to the office');
+      if (draft.timesheetPeriods.some((row) => row.id === period.id && row !== existing)) return;
+      // As the database's line ledger does (0056, timesheet_submitted_lines): no line is in two submitted timesheets.
+      const held = new Set(
+        draft.timesheetPeriods.filter((row) => row.userId === period.userId && row.submittedAt !== null).flatMap((row) => (row.snapshot?.entries ?? []).map((entry) => entry.id)),
+      );
+      const twice = (period.snapshot?.entries ?? []).find((entry) => held.has(entry.id));
+      if (twice !== undefined) throw new Error(`timesheet line ${twice.id} is already in a submitted timesheet`);
       const next: TimesheetPeriod =
         existing === undefined
           ? period
@@ -1708,8 +1709,8 @@ class DemoPayrollRepository implements PayrollRepository {
     let saved: PayrollSubmission | null = null;
     this.context.commit((draft) => {
       const rows = draft.payrollSubmissions ?? [];
-      const current = rows.filter((row) => row.userId === submission.userId && (row.supersededAt ?? null) === null);
-      if (current.some((row) => row.from === submission.from && row.to === submission.to)) return;
+      // REPEAT-DATES-1 (0056): any number of submissions may share dates; one row per id, and per timesheet period.
+      if (rows.some((row) => row.id === submission.id || (submission.timesheetPeriodId !== null && row.timesheetPeriodId === submission.timesheetPeriodId))) return;
       if (submission.financeMonth !== submission.to.slice(0, 7)) throw new Error('the Finance month is the month of To');
       if (submission.timesheetRequired !== (submission.timesheetPeriodId !== null)) throw new Error('a required timesheet names its period');
       if (submission.timesheetPeriodId !== null) {
@@ -1721,16 +1722,6 @@ class DemoPayrollRepository implements PayrollRepository {
           throw new Error('a payroll submission needs the same person\'s current sent timesheet for exactly its dates');
         }
       }
-      if (current.some((row) => row.from <= submission.to && row.to >= submission.from)) {
-        throw new Error('payroll submission overlaps one already made');
-      }
-      const monthOverlap = draft.monthlySubmissions.some((row) => {
-        if (row.userId !== submission.userId || (row.supersededAt ?? null) !== null) return false;
-        const [year, month] = row.month.split('-').map(Number) as [number, number];
-        const last = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
-        return `${row.month}-01` <= submission.to && last >= submission.from;
-      });
-      if (monthOverlap) throw new Error('payroll submission overlaps a monthly submission already made');
       saved = submission;
       draft.payrollSubmissions = [...rows, submission];
     });

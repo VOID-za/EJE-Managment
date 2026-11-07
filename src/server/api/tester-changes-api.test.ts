@@ -78,8 +78,8 @@ describe('the tester’s changes over HTTP', () => {
     const submitted = await submitForms<{ submission: { timesheetRequired: boolean; timesheetPeriodId: string | null } }>(coordinator, me, from, to);
     expect(submitted.status, JSON.stringify(submitted.error)).toBe(200);
     expect(submitted.data.submission).toMatchObject({ timesheetRequired: false, timesheetPeriodId: null });
-    // The same dates again: refused — a submitted form is never submitted again (FORM-LIFECYCLE-1).
-    expect((await submitForms(coordinator, me, from, to, { confirmReplace: true })).error?.violations[0]?.code).toBe('payroll_period_submitted');
+    // Submit to Office again with nothing newly completed: refused — what was submitted is never submitted twice.
+    expect((await coordinator.post(`/api/payroll/forms/${me}/submit`, {})).error?.violations[0]?.code).toBe('payroll_already_submitted');
 
     const master = await signedInAs(DEMO_USERS.master);
     const after = await master.get<{ rows: readonly { technician: { id: string }; submittedAt: string | null; status: string; selectable: boolean }[] }>(`/api/payroll/months/${MONTH}`);
@@ -98,7 +98,7 @@ describe('the tester’s changes over HTTP', () => {
     expect(prepared.data.package.attachments.every((attachment) => attachment.pageCount === 1)).toBe(true);
   });
 
-  it('keeps each person’s monthly history: their own, or the office’s view; never another technician’s', async () => {
+  it('keeps each person’s monthly history: their own only (FORMS-OWN-1) — the office reviews submissions on EJE Monthly Forms', async () => {
     const technician = await signedInAs(DEMO_USERS.technician);
     const me = await idOf(technician);
     expect((await technician.get<readonly unknown[]>(`/api/payroll/forms/${me}/history`)).data).toEqual([]);
@@ -111,7 +111,15 @@ describe('the tester’s changes over HTTP', () => {
 
     const other = await signedInAs(DEMO_USERS.otherTechnician);
     expect((await other.get(`/api/payroll/forms/${me}/history`)).status).toBe(403);
-    expect((await (await signedInAs(DEMO_USERS.coordinator)).get(`/api/payroll/forms/${me}/history`)).status).toBe(200);
+    // Neither the Office nor a Senior Tech reads another person's personal history or completed forms…
+    for (const office of [await signedInAs(DEMO_USERS.coordinator), await signedInAs(DEMO_USERS.master)]) {
+      expect((await office.get(`/api/payroll/forms/${me}/history`)).status).toBe(403);
+      expect((await office.get(`/api/payroll/forms/${me}/completed`)).status).toBe(403);
+      // …they review the submission in the management area.
+      const month = await office.get<{ rows: readonly { technician: { id: string }; submissions: readonly unknown[] }[] }>(`/api/payroll/months/${MONTH}`);
+      expect(month.status).toBe(200);
+      expect(month.data.rows.find((row) => row.technician.id === me)?.submissions).toHaveLength(1);
+    }
   });
 
   it('carries a technician’s message to the office and the reply back, kept in the conversation; a stranger cannot read it', async () => {

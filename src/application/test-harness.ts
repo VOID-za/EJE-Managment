@@ -28,6 +28,11 @@ export interface Harness {
   readonly outbox: SimulatedOutbox;
   /** An operation context acting as the given user. */
   as(user: User): OperationContext;
+  /**
+   * Writes the store directly — ONLY to seed history today's rules no longer make (a v1.6.0 replacement, say),
+   * exactly as it is stored in production. Never a way round a rule under test.
+   */
+  seedHistory: DemoStore['commit'];
 }
 
 export const seedUser = (id: string): User => {
@@ -168,5 +173,5 @@ export const buildHarness = (overrides: Partial<Harness['services']> = {}): Harn
     ...overrides,
   };
 
-  return { repos, outbox, services, as: (user) => ({ repos, services, actor: user }) };
+  return { repos, outbox, services, as: (user) => ({ repos, services, actor: user }), seedHistory: store.commit };
 };

@@ -284,13 +284,12 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
     expect(await postgresMessage(
       db.delete(schema.timesheetPeriods).where(eq(schema.timesheetPeriods.id, rows[0]!.id)),
     )).toContain('sent to the office');
-    expect(await postgresMessage(
-      db.insert(schema.timesheetPeriods).values({
-        id: crypto.randomUUID(), userId: IDS.technician, periodFrom: shift(today, -5), periodTo: from,
-        updatedBy: IDS.technician, commentedAt: new Date().toISOString(),
-        submittedAt: new Date().toISOString(), submittedBy: IDS.technician, snapshot: { entries: [] },
-      }),
-    )).toContain('overlaps a period already sent');
+    // REPEAT-DATES-1 (0056): another sent period sharing its days is allowed — it carries its own lines.
+    await db.insert(schema.timesheetPeriods).values({
+      id: crypto.randomUUID(), userId: IDS.technician, periodFrom: shift(today, -5), periodTo: from,
+      updatedBy: IDS.technician, commentedAt: new Date().toISOString(),
+      submittedAt: new Date().toISOString(), submittedBy: IDS.technician, snapshot: { entries: [] },
+    });
     // From after To is refused by the table itself (migration 0050: any length otherwise).
     expect(await postgresMessage(
       db.insert(schema.timesheetPeriods).values({
@@ -412,9 +411,8 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
     const lastDay = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).toISOString().slice(0, 10);
     // PAYROLL-ONE-1: the timesheet and the attendance together for the period, once.
     expect((await submitForms(tech, IDS.technician, `${month}-01`, lastDay)).status).toBe(200);
-    // Again: refused, confirmed or not — a submitted form is never submitted again (FORM-LIFECYCLE-1); ONE current.
-    expect((await submitForms(tech, IDS.technician, `${month}-01`, lastDay)).error?.violations[0]?.code).toBe('payroll_period_submitted');
-    expect((await submitForms(tech, IDS.technician, `${month}-01`, lastDay, { confirmReplace: true })).error?.violations[0]?.code).toBe('payroll_period_submitted');
+    // Submit to Office again with nothing newly completed: refused — what was submitted is never submitted twice.
+    expect((await tech.post(`/api/payroll/forms/${IDS.technician}/submit`, {})).error?.violations[0]?.code).toBe('payroll_already_submitted');
     const submissions = await db.select().from(schema.payrollSubmissions).where(eq(schema.payrollSubmissions.userId, IDS.technician));
     expect(submissions).toHaveLength(1);
     expect(submissions.filter((submission) => submission.supersededAt === null)).toHaveLength(1);
@@ -552,7 +550,7 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
     )).toContain('timesheet_entries_reviewer_bounded');
   });
 
-  it('on PostgreSQL: dates sharing any day with a submission are refused, in part or in whole, and change nothing (FORM-LIFECYCLE-1); the repository never replaces what it does not cover', async () => {
+  it('on PostgreSQL: dates sharing days with a submission are SEPARATE submissions (REPEAT-DATES-1) that never touch it; the repository never replaces what it does not cover', async () => {
     const tech = await signIn('sipho@example-test.co.za');
     for (const [date, tag] of [['2026-11-05', 'L-1105'], ['2026-11-22', 'L-1122'], ['2026-12-10', 'L-1210']] as const) {
       expect((await tech.post(`/api/timesheets/${IDS.technician}/entries`, { date, customerName: tag, overtimeHours: 1, doubleHours: 0 })).status).toBe(200);
@@ -561,22 +559,22 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
     expect(first.status, JSON.stringify(first.error)).toBe(200);
     const rows = () => db.select().from(schema.timesheetPeriods).where(eq(schema.timesheetPeriods.userId, IDS.technician)).orderBy(schema.timesheetPeriods.periodFrom);
     const entries = () => db.select().from(schema.timesheetEntries).where(eq(schema.timesheetEntries.userId, IDS.technician)).orderBy(schema.timesheetEntries.id);
-    const before = { periods: await rows(), entries: await entries() };
+    const [original] = await db.select().from(schema.timesheetPeriods).where(eq(schema.timesheetPeriods.id, first.data.period.id));
+    const linesBefore = await entries();
 
-    // The owner's example: 20 Nov – 15 Dec covers only part of 1–25 Nov.
-    const partial = await submitForms(tech, IDS.technician, '2026-11-20', '2026-12-15', { confirmReplace: true });
-    expect(partial.status).toBe(422);
-    expect(partial.error?.violations?.[0]?.code).toBe('payroll_period_submitted');
-    expect({ periods: await rows(), entries: await entries() }).toEqual(before);
-
-    // Covering all of it: refused too, confirmed or not — a submitted form is never submitted again. Nothing changed.
-    for (const confirmReplace of [false, true]) {
-      const covering = await submitForms(tech, IDS.technician, '2026-10-26', '2026-12-15', { confirmReplace });
-      expect(covering.error?.violations?.[0]?.code).toBe('payroll_period_submitted');
-    }
-    expect({ periods: await rows(), entries: await entries() }).toEqual(before);
+    // The owner's example: 20 Nov – 15 Dec shares 20–25 Nov with 1–25 Nov — accepted, carrying only 10 Dec.
+    const partial = await submitForms<{ period: { id: string; snapshot: { entries: { customerName: string }[] } } }>(tech, IDS.technician, '2026-11-20', '2026-12-15');
+    expect(partial.status, JSON.stringify(partial.error)).toBe(200);
+    expect(partial.data.period.snapshot.entries.map((entry) => entry.customerName)).toEqual(['L-1210']);
+    // Covering all of it: accepted too — and it carries nothing already submitted.
+    const covering = await submitForms<{ period: { snapshot: { entries: unknown[] } } }>(tech, IDS.technician, '2026-10-26', '2026-12-15');
+    expect(covering.status, JSON.stringify(covering.error)).toBe(200);
+    expect(covering.data.period.snapshot.entries).toEqual([]);
+    // The first, exactly as it was sent, and still current; no line was changed by any of it.
     const [kept] = await db.select().from(schema.timesheetPeriods).where(eq(schema.timesheetPeriods.id, first.data.period.id));
-    expect(kept?.supersededAt).toBeNull();
+    expect(kept).toEqual(original);
+    expect(await entries()).toEqual(linesBefore);
+    expect((await rows()).filter((row) => row.supersededAt === null)).toHaveLength(3);
 
     // The repository itself: dates covering only part of a current submission replace nothing.
     const { PostgresAttendanceRepository } = await import('@/data/postgres/attendance-repository');
@@ -586,14 +584,14 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
     expect(touched).toEqual([]);
     const [current] = await db.select().from(schema.timesheetPeriods).where(eq(schema.timesheetPeriods.id, first.data.period.id));
     expect(current?.supersededAt).toBeNull();
-    // And the database still refuses a second current submission sharing a day (20–25 Nov).
+    // And the database refuses a submission carrying a line already submitted, whatever its dates (0056).
     expect(await postgresMessage(
       db.insert(schema.timesheetPeriods).values({
         id: crypto.randomUUID(), userId: IDS.technician, periodFrom: '2026-11-20', periodTo: '2027-01-31',
         updatedBy: IDS.technician, commentedAt: new Date().toISOString(),
-        submittedAt: new Date().toISOString(), submittedBy: IDS.technician, snapshot: { entries: [] },
+        submittedAt: new Date().toISOString(), submittedBy: IDS.technician, snapshot: original!.snapshot,
       }),
-    )).toContain('overlaps a period already sent');
+    )).toContain('is already in a submitted timesheet');
   });
 
   it('TS-PAPER-6 on PostgreSQL: a 250-line submission downloads as a multi-page PDF; its original stays readable and is never replaced', async () => {
@@ -608,8 +606,10 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
     const pdf = await tech.download(`/api/timesheets/submissions/${sent.data.period.id}/pdf`);
     expect(pdf.status).toBe(200);
     expect(pdf.text).toMatch(/Page 1 of [2-9]/u);
-    const replacement = await submitForms(tech, IDS.technician, '2026-08-01', '2026-12-31', { confirmReplace: true });
-    expect(replacement.error?.violations?.[0]?.code).toBe('payroll_period_submitted');
+    // REPEAT-DATES-1: wider dates are a separate submission, never a replacement — none of the 250 lines is in it.
+    const wider = await submitForms<{ period: { snapshot: { entries: unknown[] } } }>(tech, IDS.technician, '2026-08-01', '2026-12-31');
+    expect(wider.status, JSON.stringify(wider.error)).toBe(200);
+    expect(wider.data.period.snapshot.entries).toEqual([]);
     const original = await tech.get<{ rows: unknown[]; versionLabel: string }>(`/api/timesheets/submissions/${sent.data.period.id}?version=original`);
     expect(original.status).toBe(200);
     expect(original.data.rows).toHaveLength(250);

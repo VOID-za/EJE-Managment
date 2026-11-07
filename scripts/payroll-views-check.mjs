@@ -237,23 +237,23 @@ await check('Submit to Office: a submission whose answer is lost is said, and is
   return 'one submission, the page knows it';
 });
 
-await check('History: previews open, the submitted names download; Submitted timesheets → PDF has the submitted name', async () => {
-  const row = page.locator(`[data-testid="my-monthly-history-row"][data-from="${FROM}"][data-to="${TO}"]`).first();
-  await row.waitFor({ timeout: 20000 });
+await check('History: one row per submitted form — previews open, the submitted names download (HISTORY-ONE-1)', async () => {
+  const rowOf = (kind) => page.locator(`[data-testid="my-monthly-history-form"][data-kind="${kind}"][data-from="${FROM}"][data-to="${TO}"]`).first();
+  await rowOf('timesheet').waitFor({ timeout: 20000 });
   for (const kind of ['timesheet', 'attendance']) {
+    const row = rowOf(kind);
     await press(row.getByTestId(`history-${kind}-preview`));
     await page.getByTestId('document-preview').waitFor({ timeout: 20000 });
     await page.keyboard.press('Escape');
     await page.getByTestId('document-preview').waitFor({ state: 'detached', timeout: 10000 }).catch(() => undefined);
   }
-  if ((await row.getByTestId('history-timesheet-file').textContent()) !== `${NAME}.pdf`) fail('the history does not show the submitted name');
-  const attendanceName = await row.getByTestId('history-attendance-file').textContent();
-  if ((await download(row.getByTestId('history-attendance-download'))).suggestedFilename() !== attendanceName) fail('the attendance downloaded under another name');
-  // The submitted timesheet is on My Monthly Forms (6 November 2026), never on Timesheets.
-  const submitted = page.locator('[data-testid="my-submitted-timesheets"] [data-testid="timesheet-submission"]').filter({ hasText: new RegExp(FROM.slice(8).replace(/^0/u, '')) }).first();
-  await page.getByTestId('timesheet-submissions').first().waitFor({ timeout: 20000 });
-  const pdf = await download((await submitted.count()) > 0 ? submitted.getByTestId('timesheet-submission-pdf') : page.getByTestId('timesheet-submission-pdf').first());
+  if ((await rowOf('timesheet').getByTestId('history-timesheet-file').textContent()) !== `${NAME}.pdf`) fail('the history does not show the submitted name');
+  const attendanceName = await rowOf('attendance').getByTestId('history-attendance-file').textContent();
+  if ((await download(rowOf('attendance').getByTestId('history-attendance-download'))).suggestedFilename() !== attendanceName) fail('the attendance downloaded under another name');
+  // The submitted timesheet downloads from the one History under its submitted name; no separate section.
+  const pdf = await download(rowOf('timesheet').getByTestId('history-timesheet-download'));
   if (pdf.suggestedFilename() !== `${NAME}.pdf`) fail(`the submitted timesheet PDF is called ${pdf.suggestedFilename()}`);
+  if ((await page.getByTestId('my-submitted-timesheets').count()) !== 0) fail('a separate submitted-timesheets section is still shown');
   return `${NAME}.pdf everywhere`;
 });
 
@@ -322,17 +322,21 @@ await check('Finance: a package is prepared and its files listed', async () => {
 await check('Corrections: asked for by the technician, accepted by the office — the version in force; the original still readable', async () => {
   await become('Sipho Mahlangu');
   await go(`/payroll/mine?from=${FROM}&to=${TO}`);
-  const current = page.locator('[data-testid="timesheet-submission"]').filter({ has: page.getByTestId('timesheet-submission-corrections') }).first();
-  await current.waitFor({ timeout: 20000 });
-  await press(current.getByTestId('timesheet-submission-corrections'));
+  // Under Corrections (HISTORY-ONE-1): choose the submitted timesheet, then ask.
+  const own = (await call('GET', '/api/timesheets/user-tech-sipho/working')).json?.data?.submissions?.find((entry) => entry.from === FROM && entry.to === TO && entry.current);
+  if (own === undefined) fail('no current submitted timesheet for the dates');
+  await page.getByTestId('my-timesheet-correction-choose').selectOption(own.id);
   await press(page.getByTestId('timesheet-correction-start'));
   await page.getByTestId('timesheet-correction-ot').first().fill('3.5');
   await page.getByTestId('timesheet-correction-reason').fill('The crane job ran longer — views check');
   await press(page.getByTestId('timesheet-correction-submit'));
   await page.getByTestId('timesheet-correction-done').waitFor({ timeout: 20000 });
   await become('Christene van Niekerk');
-  // The office's list of every technician's is on My Monthly Forms — reachable for the Office, who has no Timesheets page.
-  await go(`/payroll/mine?from=${FROM}&to=${TO}`);
+  // FORMS-OWN-1: the office's list of every technician's is on EJE Monthly Forms — never on a personal page.
+  await go('/payroll/mine');
+  await page.getByTestId('my-monthly-history').waitFor({ timeout: 20000 });
+  if ((await page.getByTestId('timesheet-office').count()) !== 0) fail('every technician’s timesheets are on My Monthly Forms');
+  await go('/payroll');
   const office = page.getByTestId('timesheet-office');
   await office.waitFor({ timeout: 20000 });
   const theirs = office.locator('[data-testid="timesheet-submission"]').filter({ hasText: 'Sipho' }).filter({ has: page.getByTestId('timesheet-submission-corrections') }).first();
@@ -385,10 +389,12 @@ await check('attendance only: the Coordinator submits attendance alone — no ti
   await completeOnPage('attendance');
   await submitHere();
   await page.getByTestId('my-forms-done').waitFor({ timeout: 20000 });
-  const row = page.locator(`[data-testid="my-monthly-history-row"][data-from="${FROM}"][data-to="${TO}"]`).first();
-  await row.waitFor({ timeout: 20000 });
-  if ((await row.getByTestId('history-timesheet-file').count()) !== 0) fail('a timesheet is in the Coordinator\'s submission');
-  if ((await row.getByTestId('history-attendance-file').count()) !== 1) fail('no attendance in the submission');
+  const rows = page.locator(`[data-testid="my-monthly-history-form"][data-from="${FROM}"][data-to="${TO}"]`);
+  await rows.first().waitFor({ timeout: 20000 });
+  if ((await page.locator('[data-testid="my-monthly-history-form"][data-kind="timesheet"]').count()) !== 0) fail('a timesheet is in the Coordinator\'s history');
+  if ((await rows.filter({ has: page.getByTestId('history-attendance-file') }).count()) !== 1) fail('no attendance in the submission');
+  // Attendance only: no timesheet corrections offered to the Office either.
+  if ((await page.getByTestId('my-timesheet-corrections').count()) !== 0) fail('the Office is offered timesheet corrections');
   const history = await historyFor(me);
   if (history.find((entry) => entry.from === FROM)?.timesheetRequired !== false) fail('the submission is not attendance only');
   await noPageOverflow('My Monthly Forms (Coordinator)');
@@ -403,7 +409,8 @@ await check('another technician sees none of it, and an empty history says so', 
   await page.getByTestId('my-forms-submit').waitFor({ timeout: 20000 });
   const mine = await historyFor(riaan);
   if (mine.length === 0 && (await page.getByTestId('my-monthly-history-empty').count()) !== 1) fail('an empty history is not said');
-  if (mine.length > 0 && (await page.locator('[data-testid="my-monthly-history-row"]').count()) !== mine.length) fail('the history on the screen is not the server\'s');
+  const forms = mine.reduce((total, entry) => total + Math.max(1, entry.documents.length), 0);
+  if (mine.length > 0 && (await page.locator('[data-testid="my-monthly-history-form"]').count()) !== forms) fail('the history on the screen is not the server\'s');
 });
 
 await check('no page error', async () => {

@@ -4109,7 +4109,11 @@ await step('the Master’s Timesheets page: their own sheet by day, From and To 
   await page.getByTestId('timesheet-preview').click();
   await page.getByTestId('document-preview').waitFor({ timeout: 20000 });
   await page.getByTestId('preview-close').click();
+  // FORMS-OWN-1: My Monthly Forms is personal — the office's list of everybody's is on EJE Monthly Forms.
   await page.goto(`${BASE}/payroll/mine`, { waitUntil: 'networkidle' });
+  await page.getByTestId('my-monthly-history').waitFor({ timeout: 15000 });
+  if ((await page.getByTestId('timesheet-office').count()) !== 0) throw new Error('every technician’s timesheets are on a personal page');
+  await page.goto(`${BASE}/payroll`, { waitUntil: 'networkidle' });
   await page.getByTestId('timesheet-office').waitFor({ timeout: 15000 });
 });
 
@@ -4249,7 +4253,7 @@ await step('a technician enters Workshop with OT, a call-out amount and km, writ
   await page.goto(`${BASE}/payroll/mine`, { waitUntil: 'networkidle' });
   await page.getByTestId('my-forms-submit').click();
   await page.getByTestId('my-forms-done').waitFor({ timeout: 20000 });
-  await page.locator(`[data-testid="my-monthly-history-row"][data-to="${today}"][data-current="yes"]`).first().waitFor({ timeout: 10000 });
+  await page.locator(`[data-testid="my-monthly-history-form"][data-to="${today}"][data-current="yes"]`).first().waitFor({ timeout: 10000 });
   // The comment went with it, and the next sheet starts without it.
   await page.goto(`${BASE}/timesheets`, { waitUntil: 'networkidle' });
   await page.getByTestId('timesheet-days').waitFor({ timeout: 15000 });
@@ -4257,7 +4261,8 @@ await step('a technician enters Workshop with OT, a call-out amount and km, writ
   // Submitted, it leaves Timesheets; it is kept on My Monthly Forms.
   if ((await page.getByTestId('timesheet-submission').count()) !== 0) throw new Error('a submitted timesheet is on the Timesheets page');
   await page.goto(`${BASE}/payroll/mine`, { waitUntil: 'networkidle' });
-  await page.locator(`[data-testid="my-submitted-timesheets"] [data-testid="timesheet-submission"][data-to="${today}"]`).first().waitFor({ timeout: 10000 });
+  // HISTORY-ONE-1: in the one History, as a timesheet row.
+  await page.locator(`[data-testid="my-monthly-history-form"][data-kind="timesheet"][data-to="${today}"]`).first().waitFor({ timeout: 10000 });
   await signInAsMasterIfNeeded();
   // The office was told, through the bell (the existing notifications).
   await page.goto(`${BASE}/notifications`, { waitUntil: 'networkidle' });
@@ -4274,7 +4279,7 @@ await step('a technician enters Workshop with OT, a call-out amount and km, writ
 await step('the same dates cannot be submitted again unconfirmed; the office opens the submission exactly as sent (PAYROLL-ONE-1)', async () => {
   await signInAs(page, 'Sipho Mahlangu');
   await page.goto(`${BASE}/payroll/mine`, { waitUntil: 'networkidle' });
-  const last = page.locator('[data-testid="my-submitted-timesheets"] [data-testid="timesheet-submission"][data-current="yes"]').first();
+  const last = page.locator('[data-testid="my-monthly-history-form"][data-kind="timesheet"][data-current="yes"]').first();
   await last.waitFor({ timeout: 15000 });
   const from = await last.getAttribute('data-from');
   const to = await last.getAttribute('data-to');
@@ -4293,7 +4298,8 @@ await step('the same dates cannot be submitted again unconfirmed; the office ope
   if (again.unconfirmed !== 422) throw new Error(`submitting the same dates again answered ${again.unconfirmed}`);
   if (again.retired !== 422) throw new Error(`the retired Submit timesheet answered ${again.retired}`);
   await signInAsMasterIfNeeded();
-  await page.goto(`${BASE}/payroll/mine`, { waitUntil: 'networkidle' });
+  // FORMS-OWN-1: the office reads everybody's submissions on EJE Monthly Forms.
+  await page.goto(`${BASE}/payroll`, { waitUntil: 'networkidle' });
   const office = page.getByTestId('timesheet-office');
   const row = office.locator(`[data-testid="timesheet-submission"][data-from="${from}"][data-to="${to}"]`).filter({ hasText: 'Sipho' }).first();
   await row.waitFor({ timeout: 15000 });
@@ -4584,7 +4590,7 @@ await step('My Monthly Forms previews, prints, downloads, exports and submits th
   // Submit to Office: the timesheet and the attendance together (FORM-LIFECYCLE-1).
   await card.getByTestId('my-forms-submit').click();
   await card.getByTestId('my-forms-done').waitFor({ timeout: 20000 });
-  await page.locator(`[data-testid="my-monthly-history-row"][data-from="${lastMonth.from}"][data-to="${lastMonth.to}"][data-current="yes"]`).waitFor({ timeout: 10000 });
+  await page.locator(`[data-testid="my-monthly-history-form"][data-from="${lastMonth.from}"][data-to="${lastMonth.to}"][data-current="yes"]`).first().waitFor({ timeout: 10000 });
   const month = lastMonth.month;
   // Submitting the same period again is refused, confirmed or not — a submitted form is never submitted again.
   const again = await page.evaluate(async ({ base, from, to }) => {
@@ -4697,7 +4703,7 @@ await step('a technician submits last month’s payday timesheet and attendance;
 
   await page.getByTestId('my-forms-submit').click();
   await page.getByTestId('my-forms-done').waitFor({ timeout: 20000 });
-  await page.locator(`[data-testid="my-monthly-history-row"][data-from="${previous}-01"][data-current="yes"]`).waitFor({ timeout: 10000 });
+  await page.locator(`[data-testid="my-monthly-history-form"][data-from="${previous}-01"][data-current="yes"]`).first().waitFor({ timeout: 10000 });
 
   await signInAsMasterIfNeeded();
   await page.goto(`${BASE}/payroll`, { waitUntil: 'networkidle' });

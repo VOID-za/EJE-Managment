@@ -25,7 +25,7 @@ import { assertPayrollMonth, attendanceChanges, loadAttendanceDocument } from '.
 import { loadMonthlyForms } from './monthly-submissions';
 import { loadSubmissionDocument, type TimesheetDocument } from './timesheets';
 import { formatPeriod } from '@/lib/timesheet-dates';
-import { attendancePeriodDays, loadSubmittedPayrollDocument } from './payroll-forms';
+import { attendancePeriodDays, currentSubmissions, loadSubmittedPayrollDocument } from './payroll-forms';
 
 /**
  * THE TIMESHEETS OF A MONTH: every CURRENT submission whose To falls in it.
@@ -54,6 +54,36 @@ const paydayTimesheetsEnding = async (context: OperationContext, technicianId: U
  * an old version sent in its place), and a sent package counts as "sent" only
  * for the basis it carried.
  */
+const partsOf = (basis: string | undefined): readonly string[] => (basis === undefined || basis === '' ? [] : basis.split(' '));
+/** A part without its corrections: `timesheet:<period>`, `period:<submission>`, `month:<submission>`. */
+const rootOf = (part: string): string => part.split('+')[0] ?? part;
+
+/**
+ * WHAT FINANCE ALREADY HAS OF A PERSON'S MONTH (REPEAT-DATES-1, 7 November 2026): every part of every SENT package
+ * that carried them — each submission, and each timesheet in the version it went in. A submission is sent ONCE;
+ * it goes again only marked CORRECTED, when a correction was accepted on it (or it was replaced) after it went.
+ */
+const sentPartsFor = (packages: readonly FinancePackage[], technicianId: UserId): ReadonlySet<string> =>
+  new Set(
+    packages
+      .filter((financePackage) => financePackage.status === 'sent')
+      .flatMap((financePackage) => financePackage.attachments.filter((attachment) => attachment.technicianId === technicianId).flatMap((attachment) => partsOf(attachment.basis))),
+  );
+
+/**
+ * How the month stands against what was sent: nothing new; NEW submissions only (each goes once, in addition —
+ * a repeated date is no reason to send an earlier one again); or something Finance has CHANGED since (corrected,
+ * or replaced), which re-sends the month marked CORRECTED, as before.
+ */
+const freshAgainst = (basis: string, sent: ReadonlySet<string>): { readonly fresh: readonly string[]; readonly changed: boolean } => {
+  const current = partsOf(basis);
+  const fresh = current.filter((part) => !sent.has(part));
+  const sentRoots = new Set([...sent].map(rootOf));
+  const currentRoots = new Set(current.map(rootOf));
+  const changed = fresh.some((part) => sentRoots.has(rootOf(part))) || [...sentRoots].some((root) => !currentRoots.has(root));
+  return { fresh, changed };
+};
+
 const basisOf = async (context: OperationContext, technicianId: UserId, month: string): Promise<string> => {
   const parts: string[] = [];
   for (const period of await paydayTimesheetsEnding(context, technicianId, month)) {
@@ -119,7 +149,9 @@ export type PayrollRowStatus =
   | 'ready'
   | 'correction_pending'
   | 'sent'
-  | 'corrected_after_sent';
+  | 'corrected_after_sent'
+  /** REPEAT-DATES-1: sent before, and a further submission made since — only that one goes, in addition. */
+  | 'added_after_sent';
 
 /** PAYROLL-ONE-1: one payroll submission a month's package carries for a person. */
 export interface PayrollMonthSubmission {
@@ -154,6 +186,21 @@ export interface PayrollMonthRow {
   readonly selectable: boolean;
   /** PAYROLL-ONE-1: the CURRENT payroll submissions whose Finance month (the month of To) is this one. */
   readonly submissions: readonly PayrollMonthSubmission[];
+  /**
+   * REPEAT-DATES-1: for the office to REVIEW, never a refusal — each of this month's submissions that shares days
+   * with another of the person's submissions (any month, any kind), named both ways, with the shared days and
+   * whether the other one already went to Finance. A repeated date alone is not a duplicate: each submission
+   * carries its own lines, and no line is in two (`timesheet_submitted_lines`).
+   */
+  readonly repeatedDates: readonly RepeatedDates[];
+}
+
+export interface RepeatedDates {
+  readonly submission: { readonly id: string; readonly label: string; readonly submittedAt: IsoDateTime };
+  readonly earlier: { readonly id: string; readonly kind: 'payroll' | 'monthly' | 'timesheet'; readonly label: string; readonly submittedAt: IsoDateTime | null; readonly sentToFinanceAt: IsoDateTime | null; readonly timesheetRequired: boolean };
+  readonly from: string;
+  readonly to: string;
+  readonly label: string;
 }
 
 export interface FinancePackageView extends FinancePackage {
@@ -264,15 +311,17 @@ export const loadPayrollMonth = async (context: OperationContext, month: string)
       status = 'correction_pending';
       detail = 'A timesheet correction is waiting for the office’s decision';
     } else if (lastSent !== undefined && lastSent.sentAt !== null) {
-      // RESUBMIT-1: a month submitted again after it went to Finance can be sent again too.
-      // What was sent is known exactly when the package recorded its basis; before v1.5.2, by time.
-      const corrected = sentBasis !== undefined
-        ? sentBasis !== basis
+      // What was sent is known exactly when the packages recorded their basis; before v1.5.2, by time.
+      const against = sentBasis !== undefined ? freshAgainst(basis, sentPartsFor(sentPackages, person.id)) : null;
+      const corrected = against !== null
+        ? against.changed
         : submission.submittedAt > lastSent.sentAt || (await correctedSince(context, person, month, lastSent.sentAt));
-      status = corrected ? 'corrected_after_sent' : 'sent';
+      status = corrected ? 'corrected_after_sent' : against !== null && against.fresh.length > 0 ? 'added_after_sent' : 'sent';
       detail = corrected
         ? `Corrected after it was sent to Finance on ${lastSent.sentAt.slice(0, 10)} — can be sent again, marked CORRECTED`
-        : `Sent to Finance on ${lastSent.sentAt.slice(0, 10)}`;
+        : status === 'added_after_sent'
+          ? `Sent to Finance on ${lastSent.sentAt.slice(0, 10)}; a further submission was made since — only it can be sent, in addition (what was sent is never sent again)`
+          : `Sent to Finance on ${lastSent.sentAt.slice(0, 10)}`;
     } else {
       status = 'ready';
       detail = 'Submitted — ready to include';
@@ -283,6 +332,51 @@ export const loadPayrollMonth = async (context: OperationContext, month: string)
     const changedDays = (legacy === null ? 0 : forms.attendance.changedAfterSubmission.length) + periodChanges.length;
     if (changedDays > 0) {
       detail += `; ${changedDays} attendance day(s) changed in the register after submission — Finance gets the attendance as submitted`;
+    }
+    // REPEAT-DATES-1: each pair said once, on the later submission of this month.
+    const others = await currentSubmissions(context, person);
+    const repeatedDates: RepeatedDates[] = [];
+    const sentAtOf = async (kind: 'payroll' | 'monthly' | 'timesheet', id: string, financeMonth: string): Promise<IsoDateTime | null> => {
+      const part = kind === 'payroll' ? `period:${id}` : kind === 'monthly' ? `month:${id}` : `timesheet:${id}`;
+      const found = (financeMonth === month ? packages : await context.repos.payroll.listPackages(financeMonth))
+        .filter((financePackage) => financePackage.status === 'sent' && financePackage.attachments.some((attachment) => attachment.technicianId === person.id && partsOf(attachment.basis).some((sent) => rootOf(sent) === part)))
+        .map((financePackage) => financePackage.sentAt ?? '')
+        .sort()[0];
+      return found ?? null;
+    };
+    for (const period of mine) {
+      const candidates = [
+        ...others.payroll.filter((other) => other.id !== period.id).map((other) => ({ kind: 'payroll' as const, id: other.id, from: other.from, to: other.to, submittedAt: other.submittedAt as IsoDateTime | null, financeMonth: other.financeMonth, timesheetRequired: other.timesheetRequired })),
+        ...others.monthly.map((other) => ({ kind: 'monthly' as const, id: other.id, ...monthBounds(other.month), submittedAt: other.submittedAt as IsoDateTime | null, financeMonth: other.month, timesheetRequired: other.timesheetPeriodId !== null })),
+        ...others.periods
+          .filter((other) => !others.payroll.some((submission) => submission.timesheetPeriodId === other.id))
+          .map((other) => ({ kind: 'timesheet' as const, id: other.id, from: other.from, to: other.to, submittedAt: other.submittedAt, financeMonth: other.to.slice(0, 7), timesheetRequired: true })),
+      ];
+      for (const other of candidates) {
+        const from = other.from > period.from ? other.from : period.from;
+        const to = other.to < period.to ? other.to : period.to;
+        if (from > to) continue;
+        // Both in this month: said on the later one only (the same moment: on the later id).
+        const otherAt = other.submittedAt ?? '';
+        if (other.kind === 'payroll' && mine.some((candidate) => candidate.id === other.id) && (otherAt > period.submittedAt || (otherAt === period.submittedAt && other.id > period.id))) continue;
+        repeatedDates.push({
+          submission: { id: period.id, label: formatPeriod(period.from, period.to), submittedAt: period.submittedAt },
+          earlier: {
+            id: other.id,
+            kind: other.kind,
+            label: `${other.kind === 'monthly' ? 'Monthly forms ' : other.kind === 'timesheet' ? 'Timesheet ' : ''}${formatPeriod(other.from, other.to)}`,
+            submittedAt: other.submittedAt,
+            sentToFinanceAt: await sentAtOf(other.kind, other.id, other.financeMonth),
+            timesheetRequired: other.timesheetRequired,
+          },
+          from,
+          to,
+          label: formatPeriod(from, to),
+        });
+      }
+    }
+    if (repeatedDates.length > 0) {
+      detail += `; review: ${repeatedDates.length} submission pair${repeatedDates.length === 1 ? ' shares' : 's share'} dates — allowed, each with its own lines`;
     }
     rows.push({
       technician: { id: person.id, name: userFullName(person), documentName: documentNameOf(person), active: person.active, role: person.role },
@@ -304,7 +398,7 @@ export const loadPayrollMonth = async (context: OperationContext, month: string)
           ? forms.attendance.unrecordedWeekdays.length
           : [...(legacy?.attendance.days ?? []), ...mine.flatMap((period) => period.attendance.days)].filter((day) => day.status === null).length,
       sentIn: lastSent === undefined || lastSent.sentAt === null ? null : { packageId: lastSent.id, sentAt: lastSent.sentAt },
-      selectable: status === 'ready' || status === 'corrected_after_sent',
+      selectable: status === 'ready' || status === 'corrected_after_sent' || status === 'added_after_sent',
       submissions: mine.map((period) => ({
         id: period.id,
         from: period.from,
@@ -316,6 +410,7 @@ export const loadPayrollMonth = async (context: OperationContext, month: string)
         submittedAt: period.submittedAt,
         replacesEarlier: allReplaced.has(period.id) || replacedMonthly.has(period.id),
       })),
+      repeatedDates,
     });
   }
   return {
@@ -370,6 +465,9 @@ export const prepareFinancePackage = async (
     }
     const correctedResend = row.status === 'corrected_after_sent';
     const basis = await basisOf(context, row.technician.id, month);
+    // REPEAT-DATES-1: a further submission goes on its own — what Finance already has is never sent again.
+    const already = row.status === 'added_after_sent' ? sentPartsFor(month_.packages, row.technician.id) : new Set<string>();
+    const fresh = (part: string) => ![...already].some((sent) => rootOf(sent) === part);
     const sheets: { readonly document: TimesheetDocument; readonly rendered: ReturnType<typeof renderTimesheetPdf> }[] = [];
     const attendances: { readonly rendered: { readonly fileName: string; readonly bytes: Uint8Array; readonly pageCount: number }; readonly versionLabel: string }[] = [];
     // PAYROLL-ONE-1: this person's current payroll submissions of the month, each with the names it went under.
@@ -379,6 +477,7 @@ export const prepareFinancePackage = async (
     try {
       // TS-PAPER-7: the one rule — every current submission ending in the month, in its version in force.
       for (const period of await paydayTimesheetsEnding(context, row.technician.id, month)) {
+        if (!fresh(`timesheet:${period.id}`)) continue;
         const timesheetDocument = await loadSubmissionDocument(context, period.id);
         const half = periodsOfMonth.find((submission) => submission.timesheetPeriodId === period.id);
         const document = half === undefined ? timesheetDocument : { ...timesheetDocument, fileName: half.fileNames.timesheet };
@@ -387,13 +486,14 @@ export const prepareFinancePackage = async (
       }
       // The calendar month's attendance, when it was submitted the way it was before PAYROLL-ONE-1 (and is still current).
       const legacy = await context.repos.payroll.findSubmission(row.technician.id, month);
-      if (legacy !== null && (legacy.supersededAt ?? null) === null) {
+      if (legacy !== null && (legacy.supersededAt ?? null) === null && fresh(`month:${legacy.id}`)) {
         // As SUBMITTED: a submitted record is what goes to Finance, never the register as it is now.
         const attendanceDocument = await loadAttendanceDocument(context, technicianId, month, 'submitted');
         attendances.push({ rendered: renderAttendancePdf(attendanceDocument, { generatedAt: now }), versionLabel: attendanceDocument.versionLabel });
       }
       // A period's attendance: exactly the PDF stored when it was submitted, under its name.
       for (const submission of periodsOfMonth) {
+        if (!fresh(`period:${submission.id}`)) continue;
         const stored = await loadSubmittedPayrollDocument(context, submission.id, 'attendance');
         chosenNames.add(stored.fileName);
         attendances.push({ rendered: { fileName: stored.fileName, bytes: stored.bytes, pageCount: stored.pageCount }, versionLabel: `As submitted for ${formatPeriod(submission.from, submission.to)}` });
@@ -445,7 +545,7 @@ export const prepareFinancePackage = async (
         sha256: await sha256Hex(rendered.bytes),
         sizeBytes: rendered.bytes.byteLength,
         pageCount: rendered.pageCount,
-        versionLabel,
+        versionLabel: row.status === 'added_after_sent' ? `Additional submission — ${versionLabel}` : versionLabel,
         correctedResend,
         basis,
       });
@@ -491,6 +591,9 @@ const packageEmail = (financePackage: FinancePackage): { subject: string; body: 
       '',
       `${financePackage.attachments.length} attachments. Package reference ${financePackage.id}.`,
       corrected ? 'Files marked CORRECTED replace the versions sent earlier for those technicians.' : '',
+      financePackage.attachments.some((attachment) => attachment.versionLabel.startsWith('Additional submission'))
+        ? 'Some files are an ADDITIONAL submission, made after an earlier package: they are in addition to what was sent before, never instead of it, and nothing sent before is in them again.'
+        : '',
     ].filter((line, index, all) => !(line === '' && all[index - 1] === '')).join('\n'),
   };
 };

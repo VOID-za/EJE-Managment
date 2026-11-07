@@ -146,6 +146,8 @@ export interface TimesheetTotals {
 
 /** The chosen period: its comment, and whether it — or any day inside it — was sent. */
 export interface TimesheetPeriodState {
+  /** REPEAT-DATES-1: the sent submission shown, by its own id (several may share these dates); null for open lines. */
+  readonly id: string | null;
   readonly from: IsoDate;
   readonly to: IsoDate;
   readonly label: string;
@@ -153,7 +155,7 @@ export interface TimesheetPeriodState {
   /** Set when exactly this period was sent to the office. */
   readonly submittedAt: IsoDateTime | null;
   readonly submittedByName: string | null;
-  /** Other sent periods sharing days with this one: those days are read-only. */
+  /** Other sent periods sharing days with this one (REPEAT-DATES-1: a repeated date is allowed — said, never locked). */
   readonly overlapsSent: readonly { readonly from: IsoDate; readonly to: IsoDate }[];
   /** TS-16. Corrections of exactly this sent period, oldest first. */
   readonly corrections: readonly TimesheetCorrectionView[];
@@ -339,27 +341,57 @@ const assertTimesheetDate = (_context: OperationContext, date: string): void => 
  * it. Kept as a named step, so every write still passes one place.
  */
 /**
- * FORM-LIFECYCLE-1: a day of a COMPLETED timesheet (awaiting submission) or of one SUBMITTED to the office is
- * locked — no line is added to it, changed on it, moved into or out of it, or removed from it.
+ * FORM-LIFECYCLE-1: a day of a COMPLETED timesheet (awaiting submission) is locked — no line is added to it,
+ * changed on it, moved into or out of it, or removed from it. REPEAT-DATES-1 (7 November 2026): a day of a
+ * SUBMITTED timesheet is not — a new line may be written on it for the next timesheet; the submitted LINES stay
+ * exactly as submitted (`assertMayLeave`, and the line editor's own check).
  */
 const assertDayOpen = (context: OperationContext, technicianId: UserId, date: string): Promise<void> =>
   assertDatesOpen(context, technicianId, 'timesheet', [date]);
 
-/** Whether this line is IN one of the person's current submitted timesheets (its version in force). */
-const inCurrentSubmission = async (context: OperationContext, technicianId: UserId, entryId: string): Promise<boolean> => {
-  for (const period of await context.repos.attendance.listSubmissions(technicianId)) {
-    if ((period.supersededAt ?? null) !== null) continue;
-    if (versionInForce(period, await context.repos.attendance.listCorrections(period.id)).snapshot.entries.some((entry) => entry.id === entryId)) return true;
-  }
-  return false;
+/**
+ * EVERY LINE ALREADY SUBMITTED. REPEAT-DATES-1 (the owner, 7 November 2026): a calendar date is not what is paid
+ * once — the LINE is. A date may be in any number of submitted timesheets; each LINE of a sent timesheet belongs
+ * to that submission for good: its original snapshot, and the lines of a correction accepted or still pending on
+ * it (a rejected one was never in force). The database records every submitted line once
+ * (`timesheet_submitted_lines`, keyed by the line), so no line is ever in two submissions. Current submissions
+ * first, so a line names the one in force.
+ */
+export const submittedLineHolders = async (
+  context: OperationContext,
+  userId: UserId,
+): Promise<readonly { readonly period: TimesheetPeriod; readonly ids: ReadonlySet<string> }[]> => {
+  const periods = [...(await context.repos.attendance.listSubmissions(userId))].sort(
+    (a, b) => Number((a.supersededAt ?? null) !== null) - Number((b.supersededAt ?? null) !== null),
+  );
+  return Promise.all(
+    periods.map(async (period) => {
+      const corrections = (await context.repos.attendance.listCorrections(period.id)).filter((correction) => correction.status !== 'rejected');
+      const ids = new Set([...(period.snapshot?.entries ?? []), ...corrections.flatMap((correction) => correction.after.entries)].map((entry) => entry.id));
+      return { period, ids };
+    }),
+  );
+};
+
+/** The submission holding this line, or null when it was never submitted. */
+export const submissionHolding = async (context: OperationContext, technicianId: UserId, entryId: string): Promise<TimesheetPeriod | null> =>
+  (await submittedLineHolders(context, technicianId)).find(({ ids }) => ids.has(entryId))?.period ?? null;
+
+/**
+ * THE OPEN LINES OF THESE DATES: every line the person wrote on them that no submitted timesheet holds. What a
+ * new timesheet for From–To is made of — a line already submitted is never in it again, whatever its date.
+ */
+export const openEntries = async (context: OperationContext, userId: UserId, from: string, to: string): Promise<readonly TimesheetEntry[]> => {
+  const [entries, holders] = await Promise.all([context.repos.attendance.listEntries(userId, from, to), submittedLineHolders(context, userId)]);
+  return entries.filter((entry) => !holders.some(({ ids }) => ids.has(entry.id)));
 };
 
 /**
- * A line taken away from its date (moved or removed): a line IN a submitted timesheet never is; one only left
- * over on a sent date may leave it (v1.7.1, `assertDatesOpen` → leaving).
+ * A line taken away from its date (moved or removed): a line IN a submitted timesheet never is (REPEAT-DATES-1:
+ * decided by the line, not by its date); a completed form's dates stay locked (`assertDatesOpen`).
  */
 const assertMayLeave = async (context: OperationContext, technicianId: UserId, entry: TimesheetEntry): Promise<void> => {
-  if (await inCurrentSubmission(context, technicianId, entry.id)) {
+  if ((await submissionHolding(context, technicianId, entry.id)) !== null) {
     throw refuse(
       'This line is part of a timesheet submitted to the office.',
       'timesheet_line_submitted',
@@ -477,57 +509,55 @@ export const loadTimesheet = async (
   technicianId: string,
   from: string,
   to: string,
+  /**
+   * REPEAT-DATES-1: the very submission meant (its corrections are asked for on it). Several submissions may share
+   * these dates, so the dates alone name only the open lines (or, without an id, the current one with them).
+   */
+  periodId?: string | null,
 ): Promise<Timesheet> => {
   const id = asUserId(technicianId);
   assertMayRead(context, id);
   assertRange(from, to);
   const technician = await findTechnician(context, id);
-  const [entries, comments, records, sent, stored] = await Promise.all([
-    context.repos.attendance.listEntries(id, from, to),
+  const [open, comments, records, sent, byDates, byId] = await Promise.all([
+    openEntries(context, id, from, to),
     context.repos.attendance.listComments(id, from, to),
     context.repos.attendance.listRecords(from, to, id),
     context.repos.attendance.listSubmittedPeriods(id, from, to),
-    context.repos.attendance.findPeriod(id, from, to),
+    periodId == null || periodId === '' ? context.repos.attendance.findPeriod(id, from, to) : Promise.resolve(null),
+    periodId == null || periodId === '' ? Promise.resolve(null) : context.repos.attendance.findPeriodById(periodId),
   ]);
+  // Somebody else's submission, or one for other dates, is refused exactly like one that does not exist.
+  if (periodId != null && periodId !== '' && (byId === null || byId.userId !== id || byId.from !== from || byId.to !== to)) {
+    throw refuse('That timesheet does not exist.', 'timesheet_not_found', 'Reload My Monthly Forms.');
+  }
+  const stored = byId ?? byDates;
   /*
    * TS-OVERLAP-1: a submission a later one replaced is not "sent" any more as far
    * as this sheet is concerned — the office reads the later one. Shown as a draft
    * (its comment kept), so it can be sent again, which makes it current again.
    */
-  const exact = stored !== null && (stored.supersededAt ?? null) !== null ? { ...stored, submittedAt: null, submittedBy: null } : stored;
+  const exact = byId === null && stored !== null && (stored.supersededAt ?? null) !== null ? { ...stored, submittedAt: null, submittedBy: null } : stored;
   /*
-   * THE VERSION IN FORCE for every sent day (TS-16): where a correction of its
-   * period has been accepted, the day shows that correction's lines, not the
-   * lines as they stood when it was sent. The sent snapshot is not touched.
+   * REPEAT-DATES-1. A SENT submission shows its own lines — the version in force (TS-16: the correction last
+   * accepted, or the original), read only; its snapshot is never touched. Otherwise the dates show the OPEN lines:
+   * those no submission holds. A line already submitted is never shown as part of new dates again.
    */
-  const correctionsBySent = await Promise.all(sent.map((period) => context.repos.attendance.listCorrections(period.id)));
-  let shown: readonly TimesheetEntry[] = entries;
-  const lockedRanges = sent.map((period, index) => {
-    const inForce = versionInForce(period, correctionsBySent[index] ?? []);
-    if (inForce.correction !== null) {
-      const inside = (date: string) => period.from <= date && date <= period.to;
-      shown = [
-        ...shown.filter((entry) => !inside(entry.date)),
-        ...inForce.snapshot.entries.filter((entry) => inside(entry.date) && from <= entry.date && entry.date <= to),
-      ];
-    }
-    return {
-      from: period.from,
-      to: period.to,
-      label: inForce.correction === null ? 'Sent — original' : `Sent — correction ${inForce.correction.sequence} accepted`,
-    };
-  });
+  const exactCorrections = exact?.submittedAt != null ? await context.repos.attendance.listCorrections(exact.id) : [];
+  const exactInForce = exact?.submittedAt != null ? versionInForce(exact, exactCorrections) : null;
+  const shown: readonly TimesheetEntry[] =
+    exactInForce === null ? open : exactInForce.snapshot.entries.filter((entry) => from <= entry.date && entry.date <= to);
   const { days, totals } = buildTimesheetDays({
     from,
     to,
     entries: shown,
     comments,
     attendance: new Map(records.map((record) => [record.date, record])),
-    lockedRanges,
+    lockedRanges:
+      exact === null || exactInForce === null
+        ? []
+        : [{ from: exact.from, to: exact.to, label: exactInForce.correction === null ? 'Sent — original' : `Sent — correction ${exactInForce.correction.sequence} accepted` }],
   });
-  const exactIndex = exact === null ? -1 : sent.findIndex((period) => period.id === exact.id);
-  const exactCorrections = exactIndex < 0 ? [] : correctionsBySent[exactIndex] ?? [];
-  const exactInForce = exactIndex < 0 || exact === null ? null : versionInForce(exact, exactCorrections);
   return {
     technician: personOf(technician),
     from,
@@ -535,6 +565,7 @@ export const loadTimesheet = async (
     days,
     totals,
     period: {
+      id: exact?.submittedAt != null ? exact.id : null,
       from,
       to,
       label: formatPeriod(from, to),
@@ -730,9 +761,8 @@ export const saveTimesheetEntry = async (
     throw refuse('That timesheet line does not exist.', 'entry_not_found', 'Reload the timesheet.');
   }
   await assertDayOpen(context, id, input.date);
-  if (existing !== null && existing.date !== input.date) {
-    await assertMayLeave(context, id, existing);
-  }
+  // A submitted line is never changed, moved or removed — whatever its date (REPEAT-DATES-1).
+  if (existing !== null) await assertMayLeave(context, id, existing);
 
   const values = await normaliseTimesheetLine(context, input, existing);
   const { normalHours, customerId, customerName, workshop, callouts, calloutAmount, calloutShared, internalKm, customerKm } = values;
@@ -897,19 +927,16 @@ export const saveTimesheetComment = async (
  * technician's sheet for the next one, and the comment is cleared for it.
  *
  * A SUBMISSION IS NEVER OVERWRITTEN (was RESUBMIT-1, which replaced the
- * snapshot and deleted its corrections): the same dates submitted again are
- * refused — a change after submitting is a correction, decided by the office,
- * with the original kept.
+ * snapshot and deleted its corrections): a change after submitting is a
+ * correction, decided by the office, with the original kept.
  *
- * REPLACING NEVER DROPS A DAY (TS-PAPER-7, the owner, 4 November 2026). Dates
- * that share a day with an earlier current submission must cover EVERY day of
- * it — then, and only when the technician confirms it (`replace`), the new
- * submission replaces it for the office: the earlier one is kept, marked
- * replaced, its snapshot untouched. Dates that cover only part of it are
- * refused, naming it, because the days left outside would fall out of payroll
- * with nobody choosing that. The repository replaces only submissions the new
- * dates cover, so two submissions racing cannot drop a day either: a partial
- * one left standing makes the database refuse the overlap.
+ * REPEATED DATES ARE ALLOWED (REPEAT-DATES-1, the owner, 7 November 2026;
+ * replaces TS-PAPER-7's replacement and the one-submission-per-day rule). These
+ * dates may share days with — or be exactly the dates of — an earlier
+ * submission: this one is its own submission, written beside it, and the
+ * earlier one is never touched. What it carries is the OPEN lines of these
+ * dates (`openEntries`): a line already submitted is never in it again, and
+ * the database refuses a line in two submissions (`timesheet_submitted_lines`).
  *
  * THE OFFICE IS TOLD AFTER, AND ONLY AFTER, THE SUBMISSION IS SAVED (every
  * active Master and Coordinator, in-app). A refused submission notifies
@@ -922,14 +949,6 @@ export const submitTimesheetPeriod = async (
   to: string,
   options: {
     readonly notify?: boolean;
-    readonly replace?: boolean;
-    /**
-     * PAYROLL-ONE-1 (the owner, 5 November 2026): a complete replacement may
-     * have the very same dates. With `replace`, the submission for exactly
-     * these dates is replaced like any other it covers — kept, marked
-     * replaced — and a NEW one is written beside it. Without, refused as before.
-     */
-    readonly replaceSameDates?: boolean;
     /**
      * FORM-LIFECYCLE-1: the comment as the timesheet was COMPLETED (frozen then). The working comment belongs to
      * the next sheet by now, so it is neither used nor cleared.
@@ -941,64 +960,18 @@ export const submitTimesheetPeriod = async (
   assertOwner(context, id);
   assertPeriod(context, from, to);
   const technician = await findTechnician(context, id);
-  const [entries, found, working, current] = await Promise.all([
-    context.repos.attendance.listEntries(id, from, to),
+  const [entries, found, working, repeats] = await Promise.all([
+    openEntries(context, id, from, to),
     context.repos.attendance.findPeriod(id, from, to),
     context.repos.attendance.findWorkingComment(id),
     context.repos.attendance.listSubmittedPeriods(id, from, to),
   ]);
-  // A replaced row with these dates is history, not this period's row.
-  const existing = found !== null && (found.supersededAt ?? null) === null ? found : null;
-  const sameDates = existing !== null && existing.submittedAt !== null ? existing : null;
-  if (sameDates !== null && !(options.replaceSameDates === true && options.replace === true)) {
-    throw refuse(
-      `You already submitted your timesheet for ${formatPeriod(from, to)}.`,
-      'timesheet_already_submitted',
-      'A submitted timesheet is kept exactly as it was sent. To change it, open it under Submitted timesheets on My Monthly Forms and ask for a correction.',
-    );
-  }
-  // The unsent row these dates already have (a comment saved before TS-PAPER), which submitting fills in.
-  const draftRow = sameDates === null ? existing : null;
-  const overlapping = current.filter((period) => period.id !== draftRow?.id);
-  const partial = overlapping.filter((period) => !(from <= period.from && period.to <= to));
-  if (partial.length > 0) {
-    const named = partial.map((period) => formatPeriod(period.from, period.to)).join('; ');
-    throw refuse(
-      `These dates cover only part of your submitted timesheet for ${named}.`,
-      'timesheet_partial_overlap',
-      `Submitting them would leave the rest of ${named} out of your submitted timesheets. Start after it ends, choose dates that cover all of it to replace it, or open it under Submitted timesheets on My Monthly Forms and ask for a correction.`,
-    );
-  }
-  // A correction lives on its submission, not on the sheet's lines: replacing a corrected (or
-  // correction-pending) submission from the lines would quietly undo or orphan it.
-  for (const period of overlapping) {
-    if ((await context.repos.attendance.listCorrections(period.id)).length > 0) {
-      throw refuse(
-        `Your submitted timesheet for ${formatPeriod(period.from, period.to)} has a correction, so it cannot be replaced.`,
-        'timesheet_replace_corrected',
-        'Change it with another correction under Submitted timesheets on My Monthly Forms, or choose dates that start after it ends.',
-      );
-    }
-  }
-  if (overlapping.length > 0 && options.replace !== true) {
-    const named = overlapping.map((period) => `${formatPeriod(period.from, period.to)} (${period.snapshot?.entries.length ?? 0} line${period.snapshot?.entries.length === 1 ? '' : 's'})`).join('; ');
-    throw refuse(
-      `These dates would replace your submitted timesheet for ${named}.`,
-      'timesheet_replace_unconfirmed',
-      'Confirm that the new submission replaces it. The earlier one is kept exactly as it was submitted, marked replaced.',
-    );
-  }
+  // The unsent row these dates already have (a comment saved before TS-PAPER), which submitting fills in. A SENT
+  // row with these dates is another submission: kept as it is, and this one is written beside it.
+  const draftRow = found !== null && found.submittedAt === null && (found.supersededAt ?? null) === null ? found : null;
   const now = context.services.clock.now();
   // The open sheet's comment; a comment saved on these exact dates before TS-PAPER otherwise.
   const comment = options.comment ?? (working !== null ? working.comment : draftRow?.comment ?? '');
-  const replaced = await context.repos.attendance.supersedeOverlappingPeriods({
-    userId: id,
-    from,
-    to,
-    exceptId: draftRow?.id ?? null,
-    at: now,
-    by: context.actor.id,
-  });
   let saved: TimesheetPeriod | null;
   try {
     saved = await context.repos.attendance.submitPeriod({
@@ -1014,9 +987,9 @@ export const submitTimesheetPeriod = async (
       snapshot: { technicianName: userFullName(technician), from, to, comment, entries },
     });
   } catch (cause) {
-    // Another submission for overlapping dates got there in between (the database's guard): say so plainly.
-    if (cause instanceof Error && /overlaps a period already sent/u.test(`${cause.message} ${String((cause as { cause?: unknown }).cause ?? '')}`)) {
-      throw refuse('Another submission for these dates was being sent at the same time.', 'timesheet_send_conflict', 'Reload the timesheet and submit it again.');
+    // A line of these dates went in another submission in between (the database's line ledger): say so plainly.
+    if (cause instanceof Error && /already in a submitted timesheet/u.test(`${cause.message} ${String((cause as { cause?: unknown }).cause ?? '')}`)) {
+      throw refuse('A line of these dates was submitted at the same time.', 'timesheet_line_already_submitted', 'Nothing was submitted by this one. Reload My Monthly Forms.');
     }
     throw cause;
   }
@@ -1031,17 +1004,21 @@ export const submitTimesheetPeriod = async (
     await context.repos.attendance.saveWorkingComment({ userId: id, comment: '', updatedBy: context.actor.id, updatedAt: now });
   }
   const label = formatPeriod(from, to);
+  // Said on the record, never refused: the office reviews a repeated date (REPEAT-DATES-1).
+  const repeated = repeats.length === 0
+    ? ''
+    : ` Its dates repeat days of the submitted timesheet${repeats.length === 1 ? '' : 's'} ${repeats.map((period) => formatPeriod(period.from, period.to)).join('; ')}, which ${repeats.length === 1 ? 'is' : 'are'} kept as submitted; none of their lines is in this one.`;
   await audit(context, {
     jobId: null,
     type: 'timesheet_submitted',
     summary: `Timesheet submitted: ${userFullName(technician)}, ${label}`,
-    detail: `${entries.length} line${entries.length === 1 ? '' : 's'} submitted by ${userFullName(context.actor)}.${comment === '' ? '' : ' With its comment.'}${replaced.length > 0 ? ` It replaces the overlapping submission${replaced.length === 1 ? '' : 's'} ${replaced.map((period) => formatPeriod(period.from, period.to)).join('; ')}, which ${replaced.length === 1 ? 'is' : 'are'} kept and which the office no longer reads.` : ''}`,
+    detail: `${entries.length} line${entries.length === 1 ? '' : 's'} submitted by ${userFullName(context.actor)}.${comment === '' ? '' : ' With its comment.'}${repeated}`,
   });
   if (options.notify !== false) await notifyOffice(context, {
     type: 'timesheet_submitted',
     title: `${userFullName(technician)} submitted a timesheet`,
-    body: `Period: ${label}\n${entries.length} line${entries.length === 1 ? '' : 's'}.${replaced.length > 0 ? ' It replaces an earlier submission for some of these days.' : ''} Open My Monthly Forms → Submitted timesheets to read it.`,
-    link: '/payroll/mine',
+    body: `Period: ${label}\n${entries.length} line${entries.length === 1 ? '' : 's'}.${repeats.length > 0 ? ' Some of its dates are also in an earlier submission — review them.' : ''} Open EJE Monthly Forms to read it.`,
+    link: '/payroll',
   });
   return saved;
 };
@@ -1049,10 +1026,8 @@ export const submitTimesheetPeriod = async (
 const addDays = (iso: string, days: number): IsoDate =>
   new Date(Date.parse(`${iso}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 
-/** One line of the open sheet, and — when its date is inside a current submission it is not part of — which. */
-export interface WorkingTimesheetEntry extends TimesheetEntry {
-  readonly outsideSubmitted: { readonly from: IsoDate; readonly to: IsoDate } | null;
-}
+/** One line of the open sheet: a line no submission holds (REPEAT-DATES-1: on any date, a submitted one's too). */
+export type WorkingTimesheetEntry = TimesheetEntry;
 
 /** One submission as the lists show it. */
 export interface TimesheetSubmissionView {
@@ -1134,27 +1109,14 @@ export const loadWorkingTimesheet = async (context: OperationContext, technician
   const technician = await findTechnician(context, id);
   const today = businessToday(new Date(context.services.clock.now()));
   const [entries, submitted, working, dayComments] = await Promise.all([
-    context.repos.attendance.listEntries(id, '0001-01-01', '9999-12-31'),
+    openEntries(context, id, '0001-01-01', '9999-12-31'),
     context.repos.attendance.listSubmissions(id),
     context.repos.attendance.findWorkingComment(id),
     context.repos.attendance.listComments(id, '0001-01-01', '9999-12-31'),
   ]);
   const current = submitted.filter((period) => (period.supersededAt ?? null) === null);
-  // What each current submission holds now: the lines of its version in force.
-  const held = await Promise.all(
-    current.map(async (period) => ({
-      period,
-      ids: new Set(versionInForce(period, await context.repos.attendance.listCorrections(period.id)).snapshot.entries.map((entry) => entry.id)),
-    })),
-  );
-  const open = entries
-    .flatMap((entry): WorkingTimesheetEntry[] => {
-      const covering = held.find(({ period }) => period.from <= entry.date && entry.date <= period.to);
-      if (covering === undefined) return [{ ...entry, outsideSubmitted: null }];
-      if (covering.ids.has(entry.id)) return [];
-      return [{ ...entry, outsideSubmitted: { from: covering.period.from, to: covering.period.to } }];
-    })
-    .sort((a, b) => a.date.localeCompare(b.date) || a.updatedAt.localeCompare(b.updatedAt));
+  // REPEAT-DATES-1: every line no submission holds, whatever its date — a date in a submitted timesheet included.
+  const open = [...entries].sort((a, b) => a.date.localeCompare(b.date) || a.updatedAt.localeCompare(b.updatedAt));
   const last = current.reduce<TimesheetPeriod | null>((latest, period) => (latest === null || period.to > latest.to ? period : latest), null);
   const from = last !== null ? addDays(last.to, 1) : open[0]?.date ?? today;
   const openDates = new Set(open.map((entry) => entry.date));
@@ -1392,7 +1354,8 @@ export const loadTimesheetDocument = async (
   if (sentRow !== null && (sentRow.supersededAt ?? null) !== null) {
     versionText = `${versionText} — replaced by a later submission on ${sentRow.supersededAt!.slice(0, 10)}`;
   }
-  const entries = snapshot !== null ? snapshot.entries : await context.repos.attendance.listEntries(id, from, to);
+  // Not sent: the OPEN lines of these dates (REPEAT-DATES-1) — what submitting them would carry, never a line already submitted.
+  const entries = snapshot !== null ? snapshot.entries : await openEntries(context, id, from, to);
   const rows = buildTimesheetDocumentRows(from, to, entries);
   const total = (pick: (r: TimesheetDocumentRow) => number | null): number =>
     rows.reduce((acc, r) => acc + (pick(r) ?? 0), 0);

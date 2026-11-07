@@ -24,7 +24,7 @@ import type { OperationContext } from './context';
 import { audit } from './audit';
 import { WorkflowError } from './errors';
 import { assertDatesOpen, lockedRanges } from './form-locks';
-import { assertMayRead, assertOwner, saveTimesheetEntry, removeTimesheetEntry, versionInForce } from './timesheets';
+import { assertMayRead, assertOwner, saveTimesheetEntry, removeTimesheetEntry, submittedLineHolders } from './timesheets';
 
 /**
  * TIMESHEET LINES THAT SAVE THEMSELVES. PAYROLL-ONE-1 (the owner, 5 November
@@ -94,21 +94,15 @@ export interface WorkingTimesheetLine {
   readonly completed?: { readonly from: IsoDate; readonly to: IsoDate } | null;
 }
 
-/** The current submissions' periods with the lines each holds now (its version in force). */
+/**
+ * The submitted timesheets with the lines each holds (REPEAT-DATES-1: by the line, `submittedLineHolders` — a
+ * submitted line is held for good, whatever its date and whichever dates are worked on now).
+ */
 export const currentSubmittedLines = async (
   context: OperationContext,
   userId: UserId,
-): Promise<readonly { readonly period: TimesheetPeriod; readonly entries: readonly TimesheetEntry[] }[]> => {
-  const submitted = await context.repos.attendance.listSubmissions(userId);
-  return Promise.all(
-    submitted
-      .filter((period) => (period.supersededAt ?? null) === null)
-      .map(async (period) => ({
-        period,
-        entries: versionInForce(period, await context.repos.attendance.listCorrections(period.id)).snapshot.entries,
-      })),
-  );
-};
+): Promise<readonly { readonly period: TimesheetPeriod; readonly entries: readonly { readonly id: string }[] }[]> =>
+  (await submittedLineHolders(context, userId)).map(({ period, ids }) => ({ period, entries: [...ids].map((id) => ({ id })) }));
 
 const lineOf = (
   entry: TimesheetEntry | null,
@@ -251,8 +245,8 @@ const saveLineHeld = async (
       : await serverProblems(context, userId, input.id, date, input.typed);
     return lineOf(entry, draft, null, known);
   }
-  // FORM-LIFECYCLE-1: a completed or submitted timesheet's dates are locked — kept as a draft or as a line alike.
-  // v1.7.1: the date a working line leaves may be a sent one (a line left over there, never one IN it — refused above).
+  // FORM-LIFECYCLE-1: a completed timesheet's dates are locked — kept as a draft or as a line alike. A submitted
+  // timesheet's are not (REPEAT-DATES-1): its LINES are held, refused above; a new line on its date is the next sheet's.
   await assertDatesOpen(context, userId, 'timesheet', [date]);
   await assertDatesOpen(context, userId, 'timesheet', [shownDate, entry?.date].filter((left) => left !== date), { leaving: true });
   if ((input.expectedRevision ?? null) !== revision) {

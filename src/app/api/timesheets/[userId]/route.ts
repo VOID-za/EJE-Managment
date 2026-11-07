@@ -10,8 +10,8 @@ import { parseWith, readRoute } from '@/server/api/handler';
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/u, 'Expected a date as YYYY-MM-DD');
 
 export const GET = readRoute('timesheets', (context) => {
-  const { from, to } = parseWith(
-    z.object({ from: day, to: day }).strict(),
+  const { from, to, periodId } = parseWith(
+    z.object({ from: day, to: day, periodId: z.string().min(1).max(100).optional() }).strict(),
     Object.fromEntries(context.request.nextUrl.searchParams),
   );
   return loadTimesheet(
@@ -19,5 +19,6 @@ export const GET = readRoute('timesheets', (context) => {
     context.params.userId ?? '',
     from,
     to,
+    periodId ?? null,
   );
 });

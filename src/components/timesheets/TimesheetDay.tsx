@@ -50,6 +50,7 @@ export const TimesheetDay = ({
   onMove,
   locked,
   lockedBy,
+  alsoSubmitted,
   customers,
   saver,
 }: {
@@ -61,12 +62,15 @@ export const TimesheetDay = ({
   readonly onAdd: () => void;
   readonly onMove: (to: string) => void;
   /**
-   * FORM-LIFECYCLE-1: this date is in the person's COMPLETED timesheet (awaiting submission) or one SUBMITTED —
-   * read only: no line is added, changed, moved or removed (the server refuses it too).
+   * FORM-LIFECYCLE-1: this date is in the person's COMPLETED timesheet (awaiting submission) — read only: no line
+   * is added, changed, moved or removed (the server refuses it too). REPEAT-DATES-1: a SUBMITTED timesheet's date is
+   * not locked; a new line on it belongs to the timesheet being filled in.
    */
-  readonly locked: "completed" | "submitted" | null;
-  /** Which form holds the locked date, in words ("Mon 26 Oct 2026 – Wed 4 Nov 2026, submitted on 4 Nov 2026"). */
+  readonly locked: "completed" | null;
+  /** Which completed form holds the locked date, in words ("Mon 26 Oct 2026 – Wed 4 Nov 2026"). */
   readonly lockedBy?: string;
+  /** REPEAT-DATES-1: the lines already SUBMITTED for this date, in words — said so the same work is not typed twice. */
+  readonly alsoSubmitted?: string | undefined;
   readonly customers: readonly { readonly id: string; readonly name: string }[];
   readonly saver: TimesheetAutosaver | null;
 }) => {
@@ -114,9 +118,7 @@ export const TimesheetDay = ({
               {/* A locked day's lines are in its form, not here: never "Not recorded" for a day that was recorded. */}
               {locked === 'completed'
                 ? `In your completed timesheet${lockedBy === undefined ? '' : ` (${lockedBy})`}`
-                : locked === 'submitted'
-                  ? `Already in your timesheet ${lockedBy ?? ''} — sent to the office`
-                  : 'Not recorded'}
+                : 'Not recorded'}
             </span>
           ) : (
             <>
@@ -133,10 +135,12 @@ export const TimesheetDay = ({
               Completed — on My Monthly Forms
             </Badge>
           )}
-          {locked === "submitted" && (
-            <Badge tone="outline" size="sm">
-              Sent to the office
-            </Badge>
+          {alsoSubmitted !== undefined && (
+            <span data-testid="timesheet-day-also-submitted-badge">
+              <Badge tone="outline" size="sm">
+                Also in a submitted timesheet
+              </Badge>
+            </span>
           )}
           {badge !== null && (
             <span data-testid="timesheet-day-status">
@@ -169,9 +173,12 @@ export const TimesheetDay = ({
               className="text-sm text-steel-700"
               data-testid="timesheet-day-locked"
             >
-              {locked === "completed"
-                ? `This date is in your completed timesheet${lockedBy === undefined ? '' : ` for ${lockedBy}`}. It is locked and waits on My Monthly Forms to be submitted to the office — or withdrawn there, to correct it.`
-                : `This date is already in your timesheet ${lockedBy ?? ''}, which went to the office. It is read only and is not part of the timesheet you are filling in now; a change to it is asked for as a correction on My Monthly Forms.`}
+              {`This date is in your completed timesheet${lockedBy === undefined ? '' : ` for ${lockedBy}`}. It is locked and waits on My Monthly Forms to be submitted to the office — or withdrawn there, to correct it.`}
+            </p>
+          )}
+          {alsoSubmitted !== undefined && (
+            <p className="text-sm text-steel-700" data-testid="timesheet-day-also-submitted">
+              {alsoSubmitted}
             </p>
           )}
           {locked === null && lines.length === 0 && (
@@ -181,14 +188,6 @@ export const TimesheetDay = ({
             >
               Not recorded. Add a line for each customer, site or Workshop you
               worked at.
-            </p>
-          )}
-          {locked === "submitted" && lines.length > 0 && (
-            <p className="text-sm font-medium text-amber-eje-800" data-testid="timesheet-day-stray">
-              {lines.length === 1 ? "This line was" : `These ${lines.length} lines were`} typed on this date after the
-              timesheet was sent, so {lines.length === 1 ? "it is" : "they are"} not in it and cannot be sent for this
-              date again. Remove {lines.length === 1 ? "it" : "them"}, or move {lines.length === 1 ? "it" : "them"} to a
-              date of this period with Change date.
             </p>
           )}
           {lines.length > 0 && (
@@ -214,7 +213,6 @@ export const TimesheetDay = ({
                       saver={saver}
                       day={date}
                       position={index + 1}
-                      fixed={locked === "submitted"}
                     />
                   ))}
                 </ul>

@@ -236,27 +236,37 @@ await check('a timesheet line has no Shared call-out tick; the page says the amo
 /** FORM-LIFECYCLE-1: each form completed for the period, then both submitted to the office together. */
 const submitForms = (me, from, to) => completeAndSubmit(call, me, from, to);
 
-await check('overlapping dates: part or all of a submission is refused on screen (the Completed dialog) and by the server; nothing is replaced; the original stays (FORM-LIFECYCLE-1)', async () => {
+await check('repeated dates (REPEAT-DATES-1): dates sharing part or all of a submission are accepted — each its own submission, its own lines; nothing replaced; the original stays', async () => {
   await as('Sipho Mahlangu');
   const me = 'user-tech-sipho';
   const line = await call('POST', `/api/timesheets/${me}/entries`, { date: shift(today, -3), customerName: 'Acceptance', overtimeHours: 1, doubleHours: 0 });
   if (line.status !== 200) fail(`saving a line answered ${line.status}`);
   const first = await submitForms(me, shift(today, -10), shift(today, -2));
   if (first.status !== 200) fail(`the first submission answered ${first.status} ${JSON.stringify(first.json?.error ?? '')}`);
-  for (const [from, to] of [[shift(today, -5), today], [shift(today, -12), today]]) {
-    const again = await submitForms(me, from, to);
-    if (refusalCode(again) !== 'payroll_period_submitted') fail(`${from} – ${to} answered ${again.status} ${refusalCode(again)}`);
-  }
-  // On screen: the Completed dialog says why, and OK is not offered.
+  const originalBefore = (await call('GET', `/api/timesheets/submissions?userId=${me}`)).json?.data?.[0];
+  // On screen first: the page says the dates share days with the submission (allowed), and the day names its submitted line.
   await go(`/timesheets?from=${shift(today, -5)}&to=${today}`);
-  await page.getByTestId('timesheet-complete').waitFor({ timeout: 20000 });
+  await page.getByTestId('timesheet-sent-overlap').filter({ hasText: 'That is allowed' }).waitFor({ timeout: 20000 });
+  const repeatedDay = page.locator(`[data-testid="timesheet-day"][data-date="${shift(today, -3)}"]`);
+  await repeatedDay.getByTestId('timesheet-day-also-submitted-badge').waitFor({ timeout: 15000 });
   await press(page.getByTestId('timesheet-complete'));
-  await page.getByTestId('complete-form-problems').filter({ hasText: 'already submitted' }).waitFor({ timeout: 15000 });
-  if (await page.getByTestId('complete-form-ok').isEnabled()) fail('OK is offered for dates already submitted');
+  await page.getByTestId('complete-form-cancel').waitFor({ timeout: 15000 });
+  if ((await page.getByTestId('complete-form-problems').filter({ hasText: 'already submitted' }).count()) !== 0) fail('the Completed dialog refuses dates already submitted');
   await press(page.getByTestId('complete-form-cancel'));
+  for (const [index, [from, to]] of [[shift(today, -5), today], [shift(today, -12), today]].entries()) {
+    // A new line on a date already submitted is accepted, for the next submission only.
+    const extra = await call('POST', `/api/timesheets/${me}/entries`, { date: shift(today, -3), customerName: `Acceptance repeat ${index}`, overtimeHours: 1, doubleHours: 0 });
+    if (extra.status !== 200) fail(`a line on a submitted date answered ${extra.status} ${refusalCode(extra)}`);
+    const again = await submitForms(me, from, to);
+    if (again.status !== 200) fail(`${from} – ${to} answered ${again.status} ${refusalCode(again)}`);
+  }
   const list = (await call('GET', `/api/timesheets/submissions?userId=${me}`)).json?.data ?? [];
   const earlier = list.find((row) => row.from === shift(today, -10) && row.to === shift(today, -2));
-  if (earlier?.current !== true || list.length !== 1) fail('the submission was replaced or doubled');
+  if (earlier?.current !== true || list.length !== 3 || list.some((row) => row.current !== true)) fail('a submission was replaced, or one is missing');
+  if (earlier.lineCount !== originalBefore?.lineCount) fail('the original submission changed');
+  for (const row of list.filter((candidate) => candidate.id !== earlier.id)) {
+    if (row.lineCount !== 1) fail(`${row.label} carries ${row.lineCount} lines — a line already submitted went again`);
+  }
   const original = await call('GET', `/api/timesheets/submissions/${earlier.id}?version=original`);
   if (!original.json?.data?.rows?.some((row) => row.customer === 'Acceptance')) fail('the original is not readable in full');
   await go('/payroll/mine');

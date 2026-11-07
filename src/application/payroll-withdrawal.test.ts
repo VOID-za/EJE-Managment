@@ -254,7 +254,7 @@ describe('v1.7.1: only the person’s own current forms lock their dates', () =>
     await present('2026-11-05');
   });
 
-  it('a completed form (awaiting) and an office-submitted one are told apart; the submitted one is read only', async () => {
+  it('a completed form (awaiting) locks its dates; once submitted its LINES are read only and its dates open again (REPEAT-DATES-1)', async () => {
     await line('2026-11-05', typed('1'));
     await present('2026-11-05');
     await complete('timesheet');
@@ -262,15 +262,18 @@ describe('v1.7.1: only the person’s own current forms lock their dates', () =>
     await refusedWith(line('2026-11-06', typed('1')), 'form_completed');
     await complete('attendance');
     await submitCompletedForms(harness.as(sipho), SIPHO);
-    const after = await lockedRanges(harness.as(sipho), SIPHO, 'timesheet');
-    expect(after.length).toBeGreaterThan(0);
-    expect(after.every((range) => range.why === 'submitted')).toBe(true);
-    await refusedWith(line('2026-11-06', typed('1')), 'form_submitted');
-    // The next period, after it, is open.
-    await line('2026-11-26', typed('1'));
+    // A submitted timesheet locks no date; attendance stays locked once submitted (a day has one attendance).
+    expect(await lockedRanges(harness.as(sipho), SIPHO, 'timesheet')).toEqual([]);
+    expect((await lockedRanges(harness.as(sipho), SIPHO, 'attendance')).every((range) => range.why === 'submitted')).toBe(true);
+    await refusedWith(present('2026-11-05'), 'form_submitted');
+    // A new line on a submitted date is accepted, for the next timesheet; the submitted line is never changed.
+    const fresh = await line('2026-11-06', typed('1'));
+    expect(fresh.submitted).toBeNull();
+    const held = (await loadWorkingLines(harness.as(sipho), SIPHO)).find((row) => row.submitted !== null)!;
+    await refusedWith(line(held.date, typed('7'), held.id, held.revision), 'timesheet_line_submitted');
   });
 
-  it('a line left over on a date already sent (not in that timesheet) can be removed or moved off — never changed there', async () => {
+  it('a line left over on a date already sent (not in that timesheet) is an open line like any other; a line IN it never moves', async () => {
     await line('2026-11-05', typed('1'));
     await present('2026-11-05');
     await complete('timesheet');
@@ -281,9 +284,10 @@ describe('v1.7.1: only the person’s own current forms lock their dates', () =>
     await harness.repos.attendance.saveEntry(stray);
     const shown = (await loadWorkingLines(harness.as(sipho), SIPHO)).find((row) => row.id === stray.id)!;
     expect(shown.submitted).toBeNull();
-    // Changed in place: refused (the date was sent). Moved to an open date: allowed.
-    await refusedWith(line('2026-11-05', typed('5'), stray.id, shown.revision), 'form_submitted');
-    const moved = await line('2026-11-27', shown.typed, stray.id, shown.revision);
+    // REPEAT-DATES-1: changed in place, or moved, alike — it is not in the submitted timesheet.
+    const changed = await line('2026-11-05', typed('5'), stray.id, shown.revision);
+    expect(changed.entry?.overtimeHours).toBe(5);
+    const moved = await line('2026-11-27', changed.typed, stray.id, changed.revision);
     expect(moved.date).toBe('2026-11-27');
     // A line IN the submitted timesheet is never removed or moved.
     const held = (await loadWorkingLines(harness.as(sipho), SIPHO)).find((row) => row.submitted !== null)!;

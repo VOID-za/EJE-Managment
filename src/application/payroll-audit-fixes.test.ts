@@ -77,7 +77,7 @@ describe('F1: a Finance package never sends what is no longer current', () => {
     await refusedWith(sendFinancePackage(harness.as(master), stale.id), 'package_out_of_date');
   });
 
-  it('after a sent package, a later submission makes the month "corrected after sent" — never "sent" for what Finance has not had', async () => {
+  it('after a sent package, a later submission is "further submission since sending" — never "sent" for what Finance has not had (REPEAT-DATES-1: only it goes)', async () => {
     const { harness, submit, later, row } = await setup();
     await submit('2026-11-01', '2026-11-10');
     const first = await prepareFinancePackage(harness.as(master), '2026-11', [SIPHO]);
@@ -86,8 +86,13 @@ describe('F1: a Finance package never sends what is no longer current', () => {
     later(60);
     await submit('2026-11-11', '2026-11-25');
     const after = await row();
-    expect(after.status).toBe('corrected_after_sent');
+    expect(after.status).toBe('added_after_sent');
     expect(after.selectable).toBe(true);
+    // Only the new submission goes, in addition — nothing of the first is sent again, nor marked CORRECTED.
+    const second = await prepareFinancePackage(harness.as(master), '2026-11', [SIPHO]);
+    expect(second.attachments.length).toBeGreaterThan(0);
+    expect(second.attachments.every((attachment) => attachment.versionLabel.startsWith('Additional submission') && !attachment.correctedResend)).toBe(true);
+    expect(second.attachments.some((attachment) => first.attachments.some((sent) => sent.sha256 === attachment.sha256))).toBe(false);
   });
 
   it('a package prepared and sent with nothing changed still sends (the check never blocks a current package)', async () => {

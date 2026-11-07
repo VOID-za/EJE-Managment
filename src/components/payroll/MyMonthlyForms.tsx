@@ -5,7 +5,8 @@ import { Badge, Button, ButtonLink, Card, ConfirmDialog, Icon, LoadingPanel, Que
 import { DocumentPreviewDialog } from '@/components/documents/DocumentPreviewDialog';
 import { DownloadFileButton } from '@/components/exports/DownloadFileButton';
 import { ExportPdfButton } from '@/components/exports/ExportPdfButton';
-import { SubmittedTimesheets } from '@/components/payroll/SubmittedTimesheets';
+import { TimesheetCorrectionRequests } from '@/components/payroll/SubmittedTimesheets';
+import { completesTimesheet } from '@/domain';
 import { payroll } from '@/api/endpoints';
 import { ApiRequestError, newIdempotencyKey } from '@/api/client';
 import type { PayrollSubmissionView } from '@/application/payroll-forms';
@@ -220,37 +221,69 @@ const CorrectionRow = ({ entry }: { readonly entry: CorrectionView }) => {
   );
 };
 
-const HistoryRow = ({ entry }: { readonly entry: PayrollSubmissionView }) => {
-  const [previewing, setPreviewing] = useState<Kind | null>(null);
-  const file = previewing === null ? '' : entry.fileNames[previewing];
+/**
+ * ONE SUBMITTED FORM IN THE HISTORY (HISTORY-ONE-1, the owner, 7 November 2026): a timesheet or an attendance
+ * form, told apart by its badge, with its name, its dates, when it was submitted, and its PDF exactly as it went
+ * (Preview, Download). Read only: nothing here edits, reopens, withdraws, resubmits or regenerates it. A calendar
+ * month submitted before 5 November 2026 is one row of its own.
+ */
+const HistoryForm = ({ entry, kind }: { readonly entry: PayrollSubmissionView; readonly kind: Kind | null }) => {
+  const [previewing, setPreviewing] = useState(false);
+  const document = kind === null ? undefined : entry.documents.find((candidate) => candidate.kind === kind);
   return (
-    <li className="flex flex-wrap items-center gap-3 py-2" data-testid="my-monthly-history-row" data-from={entry.from} data-to={entry.to} data-current={entry.current ? 'yes' : 'no'}>
-      <span className="min-w-40 font-medium text-steel-900">{entry.label}</span>
-      <Badge tone={entry.current ? 'green' : 'outline'} size="sm">
-        {entry.current ? `Submitted to the office ${formatDateTime(entry.submittedAt)}` : `Replaced ${formatDateTime(entry.replacedAt ?? entry.submittedAt)}`}
-      </Badge>
-      <span className="text-xs text-steel-500">
-        {entry.kind === 'monthly'
-          ? `Monthly forms (before 5 November 2026)${entry.timesheetIncluded ? ' — with the month’s timesheet' : ' — attendance'}`
-          : `${entry.timesheetRequired ? 'Timesheet and attendance' : 'Attendance only — no timesheet required'} · Finance ${entry.financeMonthLabel}`}
+    <li
+      className="grid gap-x-3 gap-y-1 py-2.5 sm:grid-cols-[7rem_minmax(0,1fr)_auto] sm:items-center"
+      data-testid="my-monthly-history-form"
+      data-kind={kind ?? 'monthly'}
+      data-submission={entry.id}
+      data-from={entry.from}
+      data-to={entry.to}
+      data-submitted-at={entry.submittedAt}
+      data-current={entry.current ? 'yes' : 'no'}
+    >
+      <span>
+        <Badge tone={kind === 'timesheet' ? 'blue' : kind === 'attendance' ? 'green' : 'outline'} size="sm">
+          {kind === null ? 'Monthly forms' : TITLE[kind]}
+        </Badge>
       </span>
-      {entry.documents.map((document) => (
-        <span key={document.kind} className="flex flex-wrap items-center gap-1">
-          <span className="text-xs break-all text-steel-700" data-testid={`history-${document.kind}-file`}>{document.fileName}</span>
-          <Button size="sm" variant="ghost" onClick={() => setPreviewing(document.kind)} data-testid={`history-${document.kind}-preview`}>Preview</Button>
-          <DownloadFileButton href={payroll.submittedPdfUrl(entry.id, document.kind)} fallbackName={document.fileName} label="Download" testId={`history-${document.kind}-download`} />
+      <span className="min-w-0">
+        <span className="block text-sm font-medium break-words text-steel-900" data-testid={kind === null ? 'history-monthly-label' : `history-${kind}-file`}>
+          {document?.fileName ?? `${entry.label}${entry.timesheetIncluded ? ' — attendance and timesheet' : ' — attendance'}`}
         </span>
-      ))}
-      <DocumentPreviewDialog
-        open={previewing !== null}
-        title={`${previewing === 'timesheet' ? 'Time Sheet' : 'Attendance'} — ${entry.label}, as submitted`}
-        description={`${file} — the PDF stored when it was submitted. It never changes.`}
-        loadPdf={() => payroll.submittedPdf(entry.id, previewing ?? 'attendance', file)}
-        onClose={() => setPreviewing(null)}
-      />
+        <span className="block text-xs text-steel-500">
+          {entry.label} · Submitted {formatDateTime(entry.submittedAt)}
+          {entry.current ? '' : ` · replaced ${formatDateTime(entry.replacedAt ?? entry.submittedAt)}`}
+          {kind === null ? ' · before 5 November 2026' : ` · Finance ${entry.financeMonthLabel}`}
+        </span>
+      </span>
+      {document !== undefined && kind !== null ? (
+        <span className="flex flex-wrap items-center gap-1">
+          <Button size="sm" variant="ghost" onClick={() => setPreviewing(true)} data-testid={`history-${kind}-preview`}>Preview</Button>
+          <DownloadFileButton href={payroll.submittedPdfUrl(entry.id, kind)} fallbackName={document.fileName} label="Download" testId={`history-${kind}-download`} />
+          <DocumentPreviewDialog
+            open={previewing}
+            title={`${kind === 'timesheet' ? 'Time Sheet' : 'Attendance'} — ${entry.label}, as submitted`}
+            description={`${document.fileName} — the PDF stored when it was submitted. It never changes.`}
+            loadPdf={() => payroll.submittedPdf(entry.id, kind, document.fileName)}
+            onClose={() => setPreviewing(false)}
+          />
+        </span>
+      ) : (
+        <span className="text-xs text-steel-500">Kept in the office&apos;s records</span>
+      )}
     </li>
   );
 };
+
+/** Every submitted form, one row each: timesheet and attendance of a submission side by side, newest submission first. */
+const historyForms = (entries: readonly PayrollSubmissionView[]): readonly { readonly entry: PayrollSubmissionView; readonly kind: Kind | null }[] =>
+  [...entries]
+    .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt))
+    .flatMap((entry) =>
+      entry.kind === 'monthly' || entry.documents.length === 0
+        ? [{ entry, kind: null as Kind | null }]
+        : (['timesheet', 'attendance'] as const).filter((kind) => entry.documents.some((document) => document.kind === kind)).map((kind) => ({ entry, kind: kind as Kind | null })),
+    );
 
 /**
  * MY MONTHLY FORMS — FORM-LIFECYCLE-1 (the owner, 6 November 2026).
@@ -261,9 +294,15 @@ const HistoryRow = ({ entry }: { readonly entry: PayrollSubmissionView }) => {
  * dates (attendance alone for the Office, who keeps no timesheet), and when
  * not, the reason is written under it. It sends both together as one
  * submission; the server checks it all again and never sends one form alone.
- * At the bottom, the HISTORY — every submission, read only, its documents as
- * they went — and the submitted timesheets with their corrections (TS-16) and,
- * for the office, every technician's (`SubmittedTimesheets`).
+ * Then CORRECTIONS: forms withdrawn before submission (FORM-WITHDRAW-1) and,
+ * for a role that keeps a timesheet, asking the office to correct a submitted
+ * one (TS-16). At the bottom, ONE HISTORY (HISTORY-ONE-1, the owner, 7 November
+ * 2026): every submitted form — timesheets and attendance together, newest
+ * first — read only, each PDF exactly as it went.
+ *
+ * PERSONAL (FORMS-OWN-1): only the signed-in person's own forms, for every role
+ * — the server refuses anybody else's. Every technician's submissions are on
+ * EJE Monthly Forms, for the office.
  */
 export const MyMonthlyForms = () => {
   const user = useCurrentUser();
@@ -358,7 +397,7 @@ export const MyMonthlyForms = () => {
       <Card className="mb-5" data-testid="my-corrections">
         <p className="text-sm font-semibold text-steel-900">Corrections</p>
         <p className="text-xs text-steel-500">
-          Forms you withdrew before submitting them, each kept exactly as it was completed, beside its correction. A submitted form is never withdrawn; a submitted timesheet is corrected under Submitted timesheets.
+          Forms you withdrew before submitting them, each kept exactly as it was completed, beside its correction. A submitted form is never withdrawn; a submitted timesheet is corrected by asking the office, below.
         </p>
         {state === null ? null : state.corrections.length === 0 ? (
           <p className="mt-3 text-sm text-steel-500" data-testid="my-corrections-empty">No form withdrawn.</p>
@@ -367,13 +406,16 @@ export const MyMonthlyForms = () => {
             {state.corrections.map((entry) => <CorrectionRow key={entry.draftId} entry={entry} />)}
           </ul>
         )}
+        {completesTimesheet(user.role) && <TimesheetCorrectionRequests />}
       </Card>
-
-      <SubmittedTimesheets />
 
       <Card className="mb-5" data-testid="my-monthly-history">
         <p className="text-sm font-semibold text-steel-900">History</p>
-        <p className="text-xs text-steel-500">Everything you submitted to the office, newest first — read only, each document exactly as it went.</p>
+        <p className="text-xs text-steel-500">
+          {completesTimesheet(user.role)
+            ? 'Every timesheet and attendance form you submitted to the office, newest first — read only, each PDF exactly as it went.'
+            : 'Every attendance form you submitted to the office, newest first — read only, each PDF exactly as it went.'}
+        </p>
         {history.error !== null ? (
           <QueryFailure code={history.errorCode} message={history.error} onRetry={history.refetch} />
         ) : history.loading || history.data === null || history.data === undefined ? (
@@ -381,8 +423,8 @@ export const MyMonthlyForms = () => {
         ) : history.data.length === 0 ? (
           <p className="mt-3 text-sm text-steel-500" data-testid="my-monthly-history-empty">Nothing submitted yet.</p>
         ) : (
-          <ul className="mt-3 divide-y divide-steel-100">
-            {history.data.map((entry) => <HistoryRow key={`${entry.kind}:${entry.id}`} entry={entry} />)}
+          <ul className="mt-2 divide-y divide-steel-100" data-testid="my-monthly-history-list">
+            {historyForms(history.data).map(({ entry, kind }) => <HistoryForm key={`${entry.kind}:${entry.id}:${kind ?? 'month'}`} entry={entry} kind={kind} />)}
           </ul>
         )}
       </Card>

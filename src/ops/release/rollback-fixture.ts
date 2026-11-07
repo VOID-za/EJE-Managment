@@ -129,6 +129,21 @@ export const ROLLBACK_0051 = {
  * the probe as `BATCH_0052`.
  */
 /** FORM-LIFECYCLE-1 (0054): a completed form awaiting submission, and one already submitted. */
+/**
+ * 0056 (REPEAT-DATES-1): two CURRENT submissions with exactly the same dates, each with its own sent timesheet and
+ * its own line (one row each in the line ledger). Copied into the probe as `BATCH_0056`.
+ */
+export const ROLLBACK_0056 = {
+  firstPeriod: '00000000-0000-4000-8000-000000000fa1',
+  secondPeriod: '00000000-0000-4000-8000-000000000fa2',
+  firstSubmission: '00000000-0000-4000-8000-000000000fb1',
+  secondSubmission: '00000000-0000-4000-8000-000000000fb2',
+  firstLine: '00000000-0000-4000-8000-000000000fc1',
+  secondLine: '00000000-0000-4000-8000-000000000fc2',
+  from: '2028-09-01',
+  to: '2028-09-25',
+} as const;
+
 /** 0055 (FORM-WITHDRAW-1): a completed form withdrawn, its correction draft, and the correction completed again. */
 export const ROLLBACK_0055 = {
   withdrawn: '00000000-0000-4000-8000-000000000ea1',

@@ -156,8 +156,8 @@ export const TimesheetSubmissions = ({
   );
 };
 
-/** The correction workflow (TS-16) for one current submission: its period, as the sheet reads it. */
-const SubmissionCorrections = ({
+/** The correction workflow (TS-16) for one current submission: that very submission (REPEAT-DATES-1: by its id). */
+export const SubmissionCorrections = ({
   user,
   submission,
   customers,
@@ -169,7 +169,7 @@ const SubmissionCorrections = ({
   readonly onChanged: () => void;
 }) => {
   const sheet = useQuery(`timesheets:corrections:${submission.id}`, () =>
-    timesheets.sheet(submission.technicianId, submission.from, submission.to),
+    timesheets.sheet(submission.technicianId, submission.from, submission.to, submission.id),
   );
   if (sheet.error !== null) return <QueryFailure code={sheet.errorCode} message={sheet.error} onRetry={sheet.refetch} />;
   if (sheet.loading || sheet.data === null || sheet.data === undefined) return <LoadingPanel rows={2} label="Loading the corrections" />;

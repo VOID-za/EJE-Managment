@@ -221,26 +221,25 @@ const TimesheetsPage = () => {
 
   const status = saver?.state() ?? { kind: 'idle' as const };
   const awaiting = completed.data?.timesheet ?? null;
-  /** A date of the completed timesheet, or of one submitted: read only. */
-  const sentOver = (date: string) => sheet.data?.submissions.find((submission) => submission.current && submission.from <= date && date <= submission.to);
-  /** Which form holds a locked date, in words — the day says it, never just "Submitted". */
-  const lockedByOf = (date: string): string | undefined => {
-    if (awaiting !== null && awaiting.from <= date && date <= awaiting.to) return formatPeriod(awaiting.from, awaiting.to);
-    const sent = sentOver(date);
-    return sent === undefined ? undefined : `for ${sent.label}, submitted on ${formatDayAndDate(sent.submittedAt.slice(0, 10))}`;
-  };
+  /** Which form holds a locked date, in words — only a COMPLETED timesheet locks its dates (FORM-LIFECYCLE-1). */
+  const lockedByOf = (date: string): string | undefined =>
+    awaiting !== null && awaiting.from <= date && date <= awaiting.to ? formatPeriod(awaiting.from, awaiting.to) : undefined;
   /*
-   * v1.7.1: the chosen dates reach into a timesheet already sent to the office. Those days are that timesheet's,
-   * not this one's (a day is never paid twice): said once, at the top, with the date this period can start on.
+   * REPEATED DATES (REPEAT-DATES-1, the owner, 7 November 2026). The chosen dates may share days with a timesheet
+   * already submitted: allowed — this is its own timesheet, tracked separately, and a line already submitted is
+   * never in it again. Said once at the top (with the suggested start, only a suggestion), and on each day that
+   * already has submitted lines, naming them, so the same work is not typed twice by mistake.
    */
   const sentInRange = usable ? (sheet.data?.submissions ?? []).filter((submission) => submission.current && submission.from <= to && from <= submission.to) : [];
   const startAfterSent = sentInRange.reduce<string | null>((latest, submission) => (latest === null || submission.to > latest ? submission.to : latest), null);
-  const lockOf = (date: string): 'completed' | 'submitted' | null =>
-    awaiting !== null && awaiting.from <= date && date <= awaiting.to
-      ? 'completed'
-      : sheet.data?.submissions.some((submission) => submission.current && submission.from <= date && date <= submission.to) === true
-        ? 'submitted'
-        : null;
+  const alsoSubmittedOf = (date: string): string | undefined => {
+    const held = (lines.data ?? []).filter((line) => line.submitted !== null && line.date === date && line.entry !== null);
+    if (held.length === 0) return undefined;
+    const periods = [...new Map(held.map((line) => [line.submitted!.periodId, line.submitted!])).values()];
+    const names = [...new Set(held.map((line) => (line.entry!.workshop ? 'Workshop' : line.entry!.customerName || 'no customer')))];
+    return `Already submitted for this date, in your timesheet ${periods.map((period) => formatPeriod(period.from, period.to)).join('; ')}: ${names.join(', ')}. Those lines stay exactly as submitted and are not in this timesheet — add a line here only for other work.`;
+  };
+  const lockOf = (date: string): 'completed' | null => (awaiting !== null && awaiting.from <= date && date <= awaiting.to ? 'completed' : null);
   /*
    * COMPLETED (FORM-LIFECYCLE-1). Offered once everything typed is on the server; the dialog asks the server what
    * stops it. Completed, the timesheet leaves this page: it is locked and moved to My Monthly Forms, and the page
@@ -492,16 +491,16 @@ const TimesheetsPage = () => {
                 )}
 
                 {sentInRange.length > 0 && startAfterSent !== null && (
-                  <div className="mt-4 rounded-[var(--radius-control)] border border-amber-eje-200 bg-amber-eje-50 p-3 text-sm text-steel-800" role="note" data-testid="timesheet-sent-overlap">
+                  <div className="mt-4 rounded-[var(--radius-control)] border border-eje-200 bg-eje-50 p-3 text-sm text-steel-800" role="note" data-testid="timesheet-sent-overlap">
                     <p>
-                      {sentInRange.map((submission) => submission.label).join('; ')}{' '}
-                      {sentInRange.length === 1 ? 'is' : 'are'} already in {sentInRange.length === 1 ? 'a timesheet' : 'timesheets'} you
-                      sent to the office. Those days are read only and are not part of the timesheet you are filling in now. Your
-                      pay period starts after {sentInRange.length === 1 ? 'it' : 'them'}.
+                      These dates share days with {sentInRange.length === 1 ? 'your submitted timesheet' : 'your submitted timesheets'}{' '}
+                      {sentInRange.map((submission) => submission.label).join('; ')}. That is allowed: this is a separate timesheet, and
+                      each submission is tracked on its own. Lines you already submitted stay exactly as they went and are not
+                      included again.
                     </p>
                     {addDaysIso(startAfterSent, 1) <= to && (
-                      <Button className="mt-2" size="sm" variant="secondary" onClick={() => choose({ from: addDaysIso(startAfterSent, 1), to })} data-testid="timesheet-start-after-sent">
-                        Start the period on {formatDayAndDate(addDaysIso(startAfterSent, 1))}
+                      <Button className="mt-2" size="sm" variant="ghost" onClick={() => choose({ from: addDaysIso(startAfterSent, 1), to })} data-testid="timesheet-start-after-sent">
+                        Suggestion: start on {formatDayAndDate(addDaysIso(startAfterSent, 1))}
                       </Button>
                     )}
                   </div>
@@ -522,6 +521,7 @@ const TimesheetsPage = () => {
                           onMove={(target) => moveDay(date, target, ofDay)}
                           locked={lockOf(date)}
                           lockedBy={lockedByOf(date)}
+                          alsoSubmitted={alsoSubmittedOf(date)}
                           customers={customers.data ?? []}
                           saver={saver}
                         />

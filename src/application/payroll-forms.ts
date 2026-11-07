@@ -8,7 +8,6 @@ import {
   type AttendanceSnapshotDay,
   type IsoDate,
   type IsoDateTime,
-  type MonthlySubmission,
   type PayrollDocumentKind,
   type PayrollSubmission,
   type PayrollSubmissionDocument,
@@ -165,15 +164,14 @@ export interface PayrollFormsState {
     readonly unrecordedWeekdays: readonly IsoDate[];
     readonly absentWithoutReason: readonly IsoDate[];
   };
-  /** Earlier submissions these dates cut: they block the submission. */
-  readonly partialOverlaps: readonly PayrollOverlap[];
-  /** Earlier submissions these dates cover in full: submitting replaces them, once confirmed. */
-  readonly replaces: readonly PayrollOverlap[];
-  /** A corrected timesheet in the way: it cannot be replaced. */
-  readonly correctedInTheWay: readonly PayrollOverlap[];
+  /**
+   * REPEAT-DATES-1: earlier submissions sharing a day with these dates. Allowed — never refused, never replaced:
+   * the new submission is its own, and carries only lines no submission holds.
+   */
+  readonly repeats: readonly PayrollOverlap[];
   /** Plain sentences: what stops the submission now. */
   readonly problems: readonly string[];
-  readonly needs: { readonly confirmUnrecorded: boolean; readonly confirmNoLines: boolean; readonly confirmReplace: boolean };
+  readonly needs: { readonly confirmUnrecorded: boolean; readonly confirmNoLines: boolean };
   readonly canSubmit: boolean;
   /** What the screen reviewed; the submission must name it. */
   readonly revision: string;
@@ -247,7 +245,8 @@ export const loadPayrollForms = async (
     timesheetRequired ? context.repos.attendance.findWorkingComment(person.id) : Promise.resolve(null),
   ]);
   // The office reads anybody's lines; the person reads their own (only a role that keeps a timesheet has any).
-  const lines: readonly WorkingTimesheetLine[] = timesheetRequired ? await loadWorkingLines(context, person.id) : [];
+  // REPEAT-DATES-1: only the OPEN lines — a line already in a submitted timesheet is never in new dates again.
+  const lines: readonly WorkingTimesheetLine[] = timesheetRequired ? (await loadWorkingLines(context, person.id)).filter((line) => line.submitted === null) : [];
   const within = (date: string | null | undefined) => date != null && from <= date && date <= to;
   const inDates = lines.filter((line) => within(line.date));
   // A stored line being moved by a draft is in these dates by EITHER date: its stored copy would be frozen by them.
@@ -261,51 +260,25 @@ export const loadPayrollForms = async (
   const unrecorded = unrecordedWeekdays(days, today);
   const absentWithoutReason = days.filter((day) => day.status === 'absent' && day.absenceReason === null).map((day) => day.date);
 
-  const partialOverlaps: PayrollOverlap[] = [];
-  const replaces: PayrollOverlap[] = [];
-  const correctedInTheWay: PayrollOverlap[] = [];
-  const sort = (overlap: PayrollOverlap, how: ReturnType<typeof relation>) => {
-    if (how === 'partial') partialOverlaps.push(overlap);
-    else if (how === 'covered') replaces.push(overlap);
-  };
-  for (const submission of current.payroll) sort(overlapOf('payroll', submission.id, submission.from, submission.to), relation(from, to, submission));
-  for (const submission of current.monthly) {
-    const bounds = monthRange(submission.month);
-    sort(overlapOf('monthly', submission.id, bounds.from, bounds.to), relation(from, to, bounds));
-  }
-  // The timesheet half follows the timesheet rules (TS-PAPER-7): a corrected one is never replaced from the lines.
-  const ownPeriodOf = new Set(current.payroll.map((submission) => submission.timesheetPeriodId).filter((id) => id !== null));
-  if (timesheetRequired) {
-    for (const period of current.periods) {
-      const how = relation(from, to, period);
-      if (how === 'apart') continue;
-      const overlap = overlapOf('timesheet', period.id, period.from, period.to);
-      if ((await context.repos.attendance.listCorrections(period.id)).length > 0) correctedInTheWay.push(overlap);
-      // A timesheet that is the half of a payroll submission listed above is not named twice.
-      else if (!ownPeriodOf.has(period.id)) sort(overlap, how);
-    }
-  }
+  /*
+   * REPEATED DATES (REPEAT-DATES-1, the owner, 7 November 2026; replaces TS-PAPER-7's partial-overlap refusal and
+   * replacement). These dates may share days with — or be exactly — an earlier submission's. Nothing is refused or
+   * replaced for it: the new submission is its own, carrying only the open lines, and the earlier one is kept as it
+   * is. Each earlier submission sharing a day is named here, so the person and the office can see it.
+   */
+  const repeats: PayrollOverlap[] = [
+    ...current.payroll.filter((submission) => relation(from, to, submission) !== 'apart').map((submission) => overlapOf('payroll', submission.id, submission.from, submission.to)),
+    ...current.monthly
+      .map((submission) => ({ submission, bounds: monthRange(submission.month) }))
+      .filter(({ bounds }) => relation(from, to, bounds) !== 'apart')
+      .map(({ submission, bounds }) => overlapOf('monthly', submission.id, bounds.from, bounds.to)),
+    // A timesheet sent on its own (before PAYROLL-ONE-1) — not the half of a payroll submission named above.
+    ...current.periods
+      .filter((period) => !current.payroll.some((submission) => submission.timesheetPeriodId === period.id) && relation(from, to, period) !== 'apart')
+      .map((period) => overlapOf('timesheet', period.id, period.from, period.to)),
+  ];
 
   const problems: string[] = [];
-  /*
-   * NEVER THE SAME DAYS TO FINANCE TWICE (the review of 5 November 2026). A
-   * submission already in a SENT Finance package may be replaced only by one
-   * for the same Finance month — that package then goes again marked
-   * CORRECTED. Replaced by dates ending in another month, its days would reach
-   * Finance a second time, unmarked; refused, naming the package.
-   */
-  for (const overlap of replaces) {
-    const sentMonth = overlap.kind === 'monthly' ? overlap.from.slice(0, 7) : financeMonthOf(overlap.to);
-    if (sentMonth === financeMonthOf(to)) continue;
-    const packages = await context.repos.payroll.listPackages(sentMonth);
-    const sent = packages.find((item) => item.status === 'sent' && item.attachments.some((attachment) => attachment.technicianId === person.id));
-    if (sent !== undefined) {
-      problems.push(
-        `Your ${overlap.label} went to Finance in the ${monthTitle(sentMonth)} package on ${(sent.sentAt ?? '').slice(0, 10)}. ` +
-          `A replacement ending in ${monthTitle(financeMonthOf(to))} would send those days again: choose dates ending in ${monthTitle(sentMonth)}, or ask the office.`,
-      );
-    }
-  }
   // A person who keeps no timesheet now, but submitted one before for these days: the office decides, not a replacement.
   if (!timesheetRequired) {
     for (const period of current.periods) {
@@ -320,14 +293,8 @@ export const loadPayrollForms = async (
   if (absentWithoutReason.length > 0) {
     problems.push(`Give the absence reason for ${absentWithoutReason.map(formatDayAndDate).join(', ')} (Attendance).`);
   }
-  for (const overlap of partialOverlaps) {
-    problems.push(`These dates cover only part of your submitted ${overlap.label}. Choose dates that start after it ends, or that cover all of it to replace it.`);
-  }
   if (timesheetRequired && sameFileName(names.names.timesheet, names.names.attendance)) {
     problems.push(`Both PDFs are called “${names.names.timesheet}”. Rename one, so they cannot overwrite each other when saved.`);
-  }
-  for (const overlap of correctedInTheWay) {
-    problems.push(`Your submitted ${overlap.label} has a correction, so it cannot be replaced. Choose dates that start after it ends.`);
   }
   const latest = [...current.payroll.map((submission) => submission.to), ...current.periods.map((period) => period.to), ...current.monthly.map((submission) => monthRange(submission.month).to)]
     .sort()
@@ -368,14 +335,11 @@ export const loadPayrollForms = async (
       unrecordedWeekdays: unrecorded,
       absentWithoutReason,
     },
-    partialOverlaps,
-    replaces,
-    correctedInTheWay,
+    repeats,
     problems,
     needs: {
       confirmUnrecorded: unrecorded.length > 0,
       confirmNoLines: timesheetRequired && complete.length === 0,
-      confirmReplace: replaces.length > 0,
     },
     canSubmit: owner && problems.length === 0,
     suggested: { from: suggestedFrom, to: today >= suggestedFrom ? today : suggestedFrom },
@@ -391,8 +355,7 @@ export const loadPayrollForms = async (
         comment: state.timesheet?.comment ?? null,
         days,
         names: names.names,
-        replaces: replaces.map((overlap) => overlap.id),
-        partial: partialOverlaps.map((overlap) => overlap.id),
+        repeats: repeats.map((overlap) => overlap.id),
       }),
     ),
   );
@@ -575,34 +538,10 @@ export const submitPayrollForms = async (
   if (state.attendance.absentWithoutReason.length > 0) {
     throw refuse('An absent day has no reason.', 'absence_reason_required', `Give the reason for ${state.attendance.absentWithoutReason.map(formatDayAndDate).join(', ')} first.`);
   }
-  if (state.partialOverlaps.length > 0) {
-    const named = state.partialOverlaps.map((overlap) => overlap.label).join('; ');
-    throw refuse(
-      `These dates cover only part of your submitted ${named}.`,
-      'payroll_partial_overlap',
-      'The days left outside would fall out of payroll. Choose dates that start after it ends, or that cover all of it to replace it. Nothing was submitted.',
-    );
-  }
-  if (state.correctedInTheWay.length > 0) {
-    throw refuse(
-      `Your submitted ${state.correctedInTheWay.map((overlap) => overlap.label).join('; ')} has a correction, so it cannot be replaced.`,
-      'timesheet_replace_corrected',
-      'Change it with another correction under Submitted timesheets on My Monthly Forms, or choose dates that start after it ends.',
-    );
-  }
-  // Anything else the screen lists as stopping it (both PDFs named the same, days already sent to Finance, …).
-  if (completed !== undefined && state.replaces.length > 0) {
-    throw refuse('These dates were already submitted.', 'payroll_period_submitted', 'A completed form is never a replacement. Nothing was submitted.');
-  }
+  // REPEAT-DATES-1: an earlier submission sharing these dates is no reason to refuse — nor ever replaced.
+  // Anything else the screen lists as stopping it (both PDFs named the same, …).
   if (completed === undefined && state.problems.length > 0) {
     throw refuse('These forms cannot be submitted yet.', 'payroll_forms_blocked', state.problems.join(' '));
-  }
-  if (state.needs.confirmReplace && input.confirmReplace !== true) {
-    throw refuse(
-      `These dates would replace your submitted ${state.replaces.map((overlap) => overlap.label).join('; ')}.`,
-      'payroll_replace_unconfirmed',
-      'Confirm that this submission replaces it. The earlier one is kept exactly as it was submitted, marked replaced, and Finance uses only the new one.',
-    );
   }
   if (state.needs.confirmUnrecorded && input.confirmUnrecorded !== true) {
     throw refuse(
@@ -649,25 +588,8 @@ export const submitPayrollForms = async (
       period = await submitTimesheetPeriod(context, technicianId, from, to, {
         notify: false,
         ...(completed === undefined ? {} : { comment: completed.timesheetComment }),
-        // Confirmed above whenever these dates cover an earlier submission in full.
-        replace: input.confirmReplace === true,
-        replaceSameDates: true,
       });
     }
-    const replacedPayroll = await context.repos.payroll.replacePayrollSubmissions({
-      userId,
-      ids: state.replaces.filter((overlap) => overlap.kind === 'payroll').map((overlap) => overlap.id),
-      at: now,
-      by: context.actor.id,
-      bySubmission: submissionId,
-    });
-    const replacedMonthly: readonly MonthlySubmission[] = await context.repos.payroll.replaceMonthlySubmissions({
-      userId,
-      ids: state.replaces.filter((overlap) => overlap.kind === 'monthly').map((overlap) => overlap.id),
-      at: now,
-      by: context.actor.id,
-      bySubmission: submissionId,
-    });
 
     // The documents as they went: rendered now, stored write-once under the server's own keys.
     const documents: PayrollSubmissionDocument[] = [];
@@ -681,7 +603,8 @@ export const submitPayrollForms = async (
       documents.push({ kind, fileName, storageKey, sha256: await sha256Hex(rendered.bytes), sizeBytes: rendered.bytes.byteLength, pageCount: rendered.pageCount });
     };
     if (period !== null) {
-      const sheet = await loadTimesheetDocument(context, person.id, from, to, 'current');
+      // This very submission's timesheet — another one may have the same dates (REPEAT-DATES-1).
+      const sheet = await loadTimesheetDocument(context, person.id, from, to, 'current', period);
       await store('timesheet', fileNames.timesheet, renderTimesheetPdf({ ...sheet, fileName: fileNames.timesheet }, { generatedAt: now }));
     }
     await store('attendance', fileNames.attendance, oneFormPage('attendance form', () => renderAttendancePdf(attendanceDocumentAt(now), { generatedAt: now })));
@@ -712,10 +635,8 @@ export const submitPayrollForms = async (
     }
 
     const name = userFullName(person);
-    const replacedText = [
-      ...replacedPayroll.map((submission) => `forms ${formatPeriod(submission.from, submission.to)}`),
-      ...replacedMonthly.map((submission) => `monthly forms ${monthTitle(submission.month)}`),
-    ];
+    // Recorded, never refused: the office reviews a repeated date (REPEAT-DATES-1).
+    const repeatedText = state.repeats.map((overlap) => overlap.label);
     await audit(context, {
       jobId: null,
       type: 'payroll_forms_submitted',
@@ -727,20 +648,20 @@ export const submitPayrollForms = async (
         ` submitted by ${userFullName(context.actor)}.` +
         (state.attendance.unrecordedWeekdays.length > 0 ? ` Confirmed with ${state.attendance.unrecordedWeekdays.length} weekday(s) without attendance: ${state.attendance.unrecordedWeekdays.join(', ')}.` : '') +
         (state.needs.confirmNoLines ? ' Confirmed: no timesheet lines for these dates.' : '') +
-        (replacedText.length > 0 ? ` Replaces ${replacedText.join('; ')}, kept exactly as submitted.` : ''),
+        (repeatedText.length > 0 ? ` Its dates repeat days of the earlier ${repeatedText.join('; ')}, kept exactly as submitted; no line of theirs is in this one.` : ''),
     });
     await notifyOffice(context, {
       type: 'timesheet_submitted',
       title: `${name} submitted ${state.timesheetRequired ? 'timesheet and attendance' : 'attendance'}: ${formatPeriod(from, to)}`,
-      body: `${state.timesheetRequired ? `${fileNames.timesheet} and ` : ''}${fileNames.attendance}. Finance month ${monthTitle(financeMonthOf(to))}.${replacedText.length > 0 ? ' It replaces an earlier submission for these days.' : ''} Open Monthly payroll to include it in the Finance package.`,
+      body: `${state.timesheetRequired ? `${fileNames.timesheet} and ` : ''}${fileNames.attendance}. Finance month ${monthTitle(financeMonthOf(to))}.${repeatedText.length > 0 ? ' Some of its dates are also in an earlier submission — review them on EJE Monthly Forms.' : ''} Open Monthly payroll to include it in the Finance package.`,
       link: '/payroll',
     });
     return saved;
   } catch (cause) {
-    // Another submission sharing these days got there first (the database's guard): say so plainly.
+    // A line of these dates went in another submission in between (the database's line ledger): say so plainly.
     const text = cause instanceof Error ? `${cause.message} ${String((cause as { cause?: unknown }).cause ?? '')}` : '';
-    if (/overlaps (one already made|a monthly submission already made|a period already sent)/u.test(text)) {
-      throw refuse('Another submission for these dates was being made at the same time.', 'payroll_submit_conflict', 'Nothing was submitted by this one. Reload My Monthly Forms to see what the office has.');
+    if (/already in a submitted timesheet/u.test(text)) {
+      throw refuse('Another submission with these lines was being made at the same time.', 'payroll_submit_conflict', 'Nothing was submitted by this one. Reload My Monthly Forms to see what the office has.');
     }
     throw cause;
   }
@@ -810,8 +731,15 @@ export const payrollSubmissionView = async (
  * monthly ones made before them, current and replaced. Their own, or the
  * office's view of anybody's.
  */
+/**
+ * THE HISTORY ON MY MONTHLY FORMS — the person's OWN submissions, newest first (FORMS-OWN-1, HISTORY-ONE-1, the
+ * owner, 7 November 2026). The owner only, whatever the role: the office reviews everybody's on EJE Monthly Forms.
+ * A person who keeps no timesheet (the Office) is shown attendance only — never a timesheet document.
+ */
 export const listPayrollHistory = async (context: OperationContext, technicianId: string): Promise<readonly PayrollSubmissionView[]> => {
-  assertMayReadAttendanceOf(context, technicianId);
+  if (context.actor.id !== technicianId) {
+    throw refuse('That history is not yours.', 'not_permitted', 'Each person reads their own history on My Monthly Forms; the office reads submissions on EJE Monthly Forms.');
+  }
   const person = await findPayrollPerson(context, technicianId);
   const named = nameCache(context);
   const [payroll, monthly] = await Promise.all([
@@ -841,7 +769,11 @@ export const listPayrollHistory = async (context: OperationContext, technicianId
       documents: [],
     });
   }
-  return views.sort((a, b) => b.to.localeCompare(a.to) || Number(b.current) - Number(a.current) || b.submittedAt.localeCompare(a.submittedAt));
+  // Newest SUBMITTED first (HISTORY-ONE-1) — by when it went, not by its dates; a person who keeps no timesheet sees no timesheet document.
+  const keeps = completesTimesheet(person.role);
+  return views
+    .map((view) => (keeps ? view : { ...view, documents: view.documents.filter((document) => document.kind !== 'timesheet') }))
+    .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt) || b.to.localeCompare(a.to));
 };
 
 /** A submission for somebody allowed to read it; refused like a missing one otherwise. */
@@ -864,6 +796,10 @@ export const loadSubmittedPayrollDocument = async (
   kind: PayrollDocumentKind,
 ): Promise<{ readonly fileName: string; readonly bytes: Uint8Array; readonly pageCount: number; readonly sha256: string }> => {
   const submission = await findReadablePayrollSubmission(context, submissionId);
+  // FORMS-OWN-1: a person who keeps no timesheet reads attendance only of their own (the office's review is not this).
+  if (kind === 'timesheet' && submission.userId === context.actor.id && !completesTimesheet(context.actor.role)) {
+    throw refuse('That submission has no such form.', 'document_not_found', 'Your forms are attendance only.');
+  }
   const document = submission.documents.find((candidate) => candidate.kind === kind);
   if (document === undefined) throw refuse('That submission has no such form.', 'document_not_found', 'An attendance-only submission has no timesheet.');
   const stored = await context.services.storage.getDocument(document.storageKey);

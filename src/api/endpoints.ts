@@ -1396,8 +1396,9 @@ export const payroll = {
 
 export const timesheets = {
   people: () => query<readonly TimesheetPerson[]>('/api/timesheets'),
-  sheet: (userId: string, from: string, to: string) =>
-    query<Timesheet>(`/api/timesheets/${segment(userId)}${search({ from, to })}`),
+  /** REPEAT-DATES-1: with `periodId`, that very submission (several may share the dates). */
+  sheet: (userId: string, from: string, to: string, periodId?: string) =>
+    query<Timesheet>(`/api/timesheets/${segment(userId)}${search(periodId === undefined ? { from, to } : { from, to, periodId })}`),
   saveComment: (userId: string, date: string, comment: string) =>
     command<{ comment: TimesheetComment | null }>(`/api/timesheets/${segment(userId)}/comment`, {
       date,
@@ -1449,7 +1450,7 @@ export const timesheets = {
   /** TS-16: ask to correct a sent timesheet — the reason and the complete corrected period. */
   requestCorrection: (
     userId: string,
-    input: { from: string; to: string; reason: string; comment: string; lines: readonly TimesheetEntryBody[] },
+    input: { from: string; to: string; periodId?: string; reason: string; comment: string; lines: readonly TimesheetEntryBody[] },
   ) =>
     command<{ correction: TimesheetCorrectionView }>(`/api/timesheets/${segment(userId)}/period/corrections`, input),
   /** TS-16: the office accepts, or rejects with a note. */

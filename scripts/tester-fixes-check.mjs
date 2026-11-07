@@ -142,8 +142,9 @@ await check('Attendance: a submitted period is read only — its days are refuse
   const day = `${PREVIOUS_MONTH}-15`;
   const changed = await call('POST', '/api/attendance', { userId: me, date: day, status: 'absent', absenceReason: 'leave', note: '' });
   if (refusalCode(changed) !== 'form_submitted') fail(`changing a submitted day answered ${changed.status} ${refusalCode(changed)}`);
-  const again = await submitForms(me, PREVIOUS_MONTH_START, PREVIOUS_MONTH_END);
-  if (refusalCode(again) !== 'payroll_period_submitted') fail(`the same dates again answered ${again.status} ${refusalCode(again)}`);
+  // Submit to Office again with nothing newly completed: refused — what was submitted is never submitted twice.
+  const again = await call('POST', `/api/payroll/forms/${me}/submit`, {});
+  if (refusalCode(again) !== 'payroll_already_submitted') fail(`submitting again answered ${again.status} ${refusalCode(again)}`);
   const history = (await call('GET', `/api/payroll/forms/${me}/history`)).json.data;
   if (history.length !== 1 || !history[0].current) fail('the submission was not kept as the one current submission');
   await go('/payroll/mine');
@@ -167,11 +168,11 @@ await check('Timesheets: no Whose timesheet block; submitted once for its dates,
   if ((await call('POST', `/api/timesheets/${me}/period/submit`, { from, to: today })).status !== 422) fail('the old Submit timesheet still answers');
   const sent = await submitForms(me, from, today);
   if (sent.status !== 200) fail(`submitting answered ${sent.status} ${JSON.stringify(sent.json?.error ?? '')}`);
-  const again = await submitForms(me, from, today);
-  if (again.status !== 422) fail(`the same dates again answered ${again.status}`);
-  // Submitted, it is kept on My Monthly Forms — not on Timesheets (6 November 2026).
+  const again = await call('POST', `/api/payroll/forms/${me}/submit`, {});
+  if (again.status !== 422) fail(`submitting again answered ${again.status}`);
+  // Submitted, it is kept in the one History on My Monthly Forms — not on Timesheets (HISTORY-ONE-1).
   await go('/payroll/mine');
-  await page.locator(`[data-testid="my-submitted-timesheets"] [data-testid="timesheet-submission"][data-from="${from}"][data-to="${today}"]`).first().waitFor({ timeout: 20000 });
+  await page.locator(`[data-testid="my-monthly-history-form"][data-kind="timesheet"][data-from="${from}"][data-to="${today}"]`).first().waitFor({ timeout: 20000 });
   await go('/timesheets');
   await page.getByTestId('timesheet-days').waitFor({ timeout: 20000 });
   if ((await page.getByTestId('timesheet-submission').count()) !== 0) fail('a submitted timesheet is on the Timesheets page');

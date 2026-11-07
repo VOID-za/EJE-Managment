@@ -274,7 +274,7 @@ describe('TS-10 / TS-12 — one comment for the open timesheet; Save is not a su
 });
 
 describe('TS-02 / TS-03 / TS-14 — Submit timesheet, for the dates confirmed (TS-PAPER)', () => {
-  it('records an IMMUTABLE submission with who and when; the same dates again are refused, never overwritten', async () => {
+  it('records an IMMUTABLE submission with who and when; the same dates again make a separate one, never an overwrite (REPEAT-DATES-1)', async () => {
     const inside = await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(4)));
     const before = await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(8)));
     await saveWorkingTimesheetComment(harness.as(sipho), SIPHO, 'All in order.');
@@ -298,46 +298,48 @@ describe('TS-02 / TS-03 / TS-14 — Submit timesheet, for the dates confirmed (T
     expect(working.entries.map((entry) => entry.id)).toEqual([before.id]);
     expect(working.lastSubmission).toMatchObject({ from: FROM, to: TO });
 
-    // A line changed afterwards is refused (FORM-LIFECYCLE-1: submitted dates are read only) — the submission is untouched.
+    // A submitted line changed afterwards is refused (by the line: it is in the submission) — the submission is untouched.
     await expect(saveTimesheetEntry(harness.as(sipho), SIPHO, { ...line(day(4), { overtimeHours: 3 }), entryId: inside.id })).rejects.toMatchObject({
-      violations: [{ code: 'form_submitted' }],
+      violations: [{ code: 'timesheet_line_submitted' }],
     });
     const still = await loadTimesheetDocument(harness.as(coordinator), SIPHO, FROM, TO);
     expect(still.rows.find((row) => row.recorded)?.overtimeHours).toBe(1.5);
 
-    // The same dates again: refused — a change after submitting is a correction.
-    await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO)).rejects.toMatchObject({ violations: [{ code: 'timesheet_already_submitted' }] });
-    const kept = await harness.repos.attendance.findPeriod(SIPHO, FROM, TO);
+    // The same dates again: a SEPARATE submission, carrying only lines not yet submitted — the first is kept exactly.
+    const extra = await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(4), { overtimeHours: 2 }));
+    const again = await submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO);
+    expect(again.id).not.toBe(sent.id);
+    expect(again.snapshot?.entries.map((entry) => entry.id)).toEqual([extra.id]);
+    const kept = await harness.repos.attendance.findPeriodById(sent.id);
     expect(kept?.snapshot).toEqual(sent.snapshot);
     expect(kept?.submittedAt).toBe(sent.submittedAt);
-    expect((await events('timesheet_submitted')).length).toBe(1);
+    expect(kept?.supersededAt ?? null).toBeNull();
+    expect((await events('timesheet_submitted')).length).toBe(2);
   });
 
-  it('TS-OVERLAP-1 / TS-PAPER-7: dates COVERING an earlier submission replace it once confirmed; the earlier one is KEPT', async () => {
+  it('REPEAT-DATES-1: dates COVERING an earlier submission are their own submission; the earlier one is never replaced', async () => {
     await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(4)));
     const first = await submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO);
     await saveWorkingTimesheetComment(harness.as(sipho), SIPHO, 'Covers the shutdown week');
-    // Not without the technician's confirmation.
-    await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, day(10), day(0))).rejects.toMatchObject({ violations: [{ code: 'timesheet_replace_unconfirmed' }] });
-    const wider = await submitTimesheetPeriod(harness.as(sipho), SIPHO, day(10), day(0), { replace: true });
+    const wider = await submitTimesheetPeriod(harness.as(sipho), SIPHO, day(10), day(0));
     expect(wider.comment).toBe('Covers the shutdown week');
+    expect(wider.snapshot?.entries).toEqual([]);
     const current = await harness.repos.attendance.listSubmittedPeriods(SIPHO, day(30), day(0));
-    expect(current.map((period) => period.id)).toEqual([wider.id]);
-    const replaced = await harness.repos.attendance.findPeriod(SIPHO, FROM, TO);
-    expect(replaced?.supersededAt).toBeTruthy();
-    // Kept exactly as it was submitted, and still listed — marked replaced.
-    expect(replaced?.snapshot).toEqual(first.snapshot);
+    expect(current.map((period) => period.id).sort()).toEqual([first.id, wider.id].sort());
+    const kept = await harness.repos.attendance.findPeriodById(first.id);
+    expect(kept?.supersededAt ?? null).toBeNull();
+    expect(kept?.snapshot).toEqual(first.snapshot);
     const listed = await listTimesheetSubmissions(harness.as(master), SIPHO);
-    expect(listed.map((row) => [row.id, row.current])).toEqual([[wider.id, true], [first.id, false]]);
+    expect(listed.map((row) => [row.id, row.current])).toEqual([[wider.id, true], [first.id, true]]);
     // Lines are never touched by any of it.
     const lines = await harness.repos.attendance.listEntries(SIPHO, day(30), day(0));
     expect(lines.map((entry) => entry.date)).toEqual([day(4)]);
     const trail = (await harness.repos.activity.list()).filter((event) => event.type === 'timesheet_submitted');
-    expect(trail.some((event) => event.detail.includes('replaces the overlapping submission'))).toBe(true);
+    expect(trail.some((event) => event.detail.includes('repeat days of the submitted timesheet'))).toBe(true);
     // A disjoint period is simply another current submission.
     await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(25)));
     await submitTimesheetPeriod(harness.as(sipho), SIPHO, day(26), day(24));
-    expect((await harness.repos.attendance.listSubmittedPeriods(SIPHO, day(30), day(0))).length).toBe(2);
+    expect((await harness.repos.attendance.listSubmittedPeriods(SIPHO, day(30), day(0))).length).toBe(3);
   });
 
   it('validates only the dates themselves: From after To refused; any length, any end — a future To included', async () => {
@@ -368,9 +370,9 @@ describe('TS-02 / TS-03 / TS-14 — Submit timesheet, for the dates confirmed (T
     const one = (await harness.repos.notifications.list(officeIds[0]!)).find((n) => n.type === 'timesheet_submitted');
     expect(one?.title).toContain('Sipho');
     expect(one?.body).toContain(formatDayAndDate(FROM));
-    expect(one?.link).toBe('/payroll/mine');
-    // The same dates again are refused, so nobody is told twice; the next period tells them again.
-    await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO)).rejects.toBeDefined();
+    // FORMS-OWN-1: the office reads it on EJE Monthly Forms, never on a personal page.
+    expect(one?.link).toBe('/payroll');
+    // Each submission tells them once; a later one — the same dates included (REPEAT-DATES-1) — tells them again.
     expect(await count()).toBe(officeIds.length);
     await submitTimesheetPeriod(harness.as(sipho), SIPHO, day(1), day(0));
     expect(await count()).toBe(officeIds.length * 2);

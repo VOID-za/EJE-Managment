@@ -205,10 +205,10 @@ export const timesheetPeriods = pgTable(
     version: rowVersion(),
   },
   (table) => [
-    // PAYROLL-ONE-1 (0052): one CURRENT row per person and dates; a replaced one is kept beside its replacement.
-    uniqueIndex('timesheet_periods_user_range_current_key')
+    // REPEAT-DATES-1 (0056): one UNSENT row per person and dates; any number of SENT ones may share dates.
+    uniqueIndex('timesheet_periods_user_range_unsent_key')
       .on(table.userId, table.periodFrom, table.periodTo)
-      .where(sql`${table.supersededAt} is null`),
+      .where(sql`${table.supersededAt} is null and ${table.submittedAt} is null`),
     index('timesheet_periods_user_idx').on(table.userId, table.periodFrom),
     // TS-PAPER (0050): any length — a pay period ends on the real payday, however far away.
     check('timesheet_periods_range_ordered', sql`${table.periodFrom} <= ${table.periodTo}`),
@@ -420,9 +420,8 @@ export const payrollSubmissions = pgTable(
     index('payroll_submissions_user_idx').on(table.userId, table.periodFrom),
     index('payroll_submissions_finance_month_idx').on(table.financeMonth),
     uniqueIndex('payroll_submissions_timesheet_key').on(table.timesheetPeriodId),
-    uniqueIndex('payroll_submissions_current_range_key')
-      .on(table.userId, table.periodFrom, table.periodTo)
-      .where(sql`${table.supersededAt} is null`),
+    // REPEAT-DATES-1 (0056): several submissions may share — or have exactly — the same dates.
+    index('payroll_submissions_user_range_idx').on(table.userId, table.periodFrom, table.periodTo),
     check('payroll_submissions_range_ordered', sql`${table.periodFrom} <= ${table.periodTo}`),
     check('payroll_submissions_range_bounded', sql`${table.periodTo} - ${table.periodFrom} < 366`),
     check('payroll_submissions_finance_month_of_to', sql`${table.financeMonth} = to_char(${table.periodTo}, 'YYYY-MM')`),
@@ -587,5 +586,33 @@ export const payrollFormCorrectionDrafts = pgTable(
     uniqueIndex('payroll_form_correction_drafts_open_key').on(table.userId, table.kind).where(sql`${table.completedId} is null`),
     check('payroll_form_correction_drafts_kind_known', sql`${table.kind} in ('timesheet', 'attendance')`),
     check('payroll_form_correction_drafts_range_ordered', sql`${table.periodFrom} <= ${table.periodTo}`),
+  ],
+);
+
+/**
+ * EVERY SUBMITTED TIMESHEET LINE, ONCE. REPEAT-DATES-1, migration 0056 (the
+ * owner, 7 November 2026): a calendar date may be in any number of submitted
+ * timesheets; a LINE is in exactly one. Written by the database itself as a
+ * timesheet period is sent (`record_timesheet_submitted_lines`), which refuses
+ * a line already here; append-only.
+ */
+export const timesheetSubmittedLines = pgTable(
+  'timesheet_submitted_lines',
+  {
+    entryId: text('entry_id').primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    workDate: date('work_date').notNull(),
+    periodId: uuid('period_id')
+      .notNull()
+      .references(() => timesheetPeriods.id, { onDelete: 'restrict' }),
+    submittedAt: instant('submitted_at').notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    index('timesheet_submitted_lines_user_date_idx').on(table.userId, table.workDate),
+    index('timesheet_submitted_lines_period_idx').on(table.periodId),
+    check('timesheet_submitted_lines_entry_bounded', sql`char_length(${table.entryId}) between 1 and 100`),
   ],
 );

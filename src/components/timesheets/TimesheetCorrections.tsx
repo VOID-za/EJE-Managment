@@ -124,6 +124,7 @@ export const TimesheetCorrections = ({
       await timesheets.requestCorrection(personId, {
         from: period.from,
         to: period.to,
+        ...(period.id === null ? {} : { periodId: period.id }),
         reason,
         comment,
         lines: rows.map((row) => {

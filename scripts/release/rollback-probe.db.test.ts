@@ -29,11 +29,11 @@ import { asCustomerId, asJobId, can, getJobTypeDefinition, notificationCategory,
 /**
  * ROLLBACK COMPATIBILITY, PHASE 2 OF 2: THE LIVE RELEASE'S OWN CODE.
  *
- * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (38b75cd, v1.7.0), copied there
+ * THIS FILE RUNS INSIDE A CHECKOUT OF THE LIVE RELEASE (55e1d06, v1.7.1), copied there
  * by `scripts/release/rollback-compat.sh`, so every `@/…` import below is the
  * LIVE code — the repository, the searchability wording and the preflight rule
  * as they are on the server today. It must therefore import only what exists
- * in 38b75cd, and it does: each of these was checked against that commit.
+ * in 55e1d06, and it does: each of these was checked against that commit.
  *
  * The database was migrated to the newest migration THIS release ships (0049)
  * and populated by it (phase 1). The question is the one a rollback asks: after
@@ -101,6 +101,18 @@ const INTEGRATIONS = {
   templateVersion: '00000000-0000-4000-8000-0000000006a2',
   email: '00000000-0000-4000-8000-0000000006b1',
   outbox: '00000000-0000-4000-8000-0000000006c1',
+} as const;
+
+// A copy of ROLLBACK_0056 in `src/ops/release/rollback-fixture.ts`.
+const BATCH_0056 = {
+  firstPeriod: '00000000-0000-4000-8000-000000000fa1',
+  secondPeriod: '00000000-0000-4000-8000-000000000fa2',
+  firstSubmission: '00000000-0000-4000-8000-000000000fb1',
+  secondSubmission: '00000000-0000-4000-8000-000000000fb2',
+  firstLine: '00000000-0000-4000-8000-000000000fc1',
+  secondLine: '00000000-0000-4000-8000-000000000fc2',
+  from: '2028-09-01',
+  to: '2028-09-25',
 } as const;
 
 // A copy of ROLLBACK_0055 in `src/ops/release/rollback-fixture.ts`.
@@ -202,15 +214,15 @@ describePhase('rollback compatibility — phase 2: the live release (42e71fc) ag
       readFileSync(join(process.cwd(), 'src/db/migrations/meta/_journal.json'), 'utf8'),
     ) as { entries: { tag: string }[] };
     const shipped = journal.entries.map((entry) => entry.tag);
-    // 38b75cd (v1.7.0) shipped up to 0054; this release adds 0055 (withdrawn forms and their corrections).
-    expect(shipped).toHaveLength(55);
-    expect(shipped.at(-1)).toBe('0054_payroll_form_completions');
-    expect(shipped).not.toContain('0055_payroll_form_withdrawals');
+    // 55e1d06 (v1.7.1) shipped up to 0055; this release adds 0056 (repeated dates; the submitted-line ledger).
+    expect(shipped).toHaveLength(56);
+    expect(shipped.at(-1)).toBe('0055_payroll_form_withdrawals');
+    expect(shipped).not.toContain('0056_timesheet_repeated_dates');
 
     const rows = await db.execute<{ n: string }>(sql`select count(*)::text as n from drizzle.__drizzle_migrations`);
     const applied = Number(rows[0]?.n);
-    // 0055 applied beyond what the live release ships: the preflight warns, never fails.
-    expect(applied).toBe(56);
+    // 0056 applied beyond what the live release ships: the preflight warns, never fails.
+    expect(applied).toBe(57);
 
     const checks = checkMigrations(shipped, { applied, schemaPresent: true });
     expect(checks.every((check) => check.verdict !== 'fail')).toBe(true);
@@ -639,7 +651,7 @@ describePhase('rollback compatibility — phase 2: the live release (42e71fc) ag
    * these rows itself, so its period submission (ON CONFLICT on the current
    * row) works too. And 0053, which it has never heard of, changes none of it.
    */
-  it('meets the 0052 rows: reads both periods with the same dates, still writes lines and periods (and 0053 changes nothing for it)', async () => {
+  it('meets the 0052 rows: reads both periods with the same dates, still writes lines (and 0053 changes nothing); its period submit is refused at 0056, writing nothing', async () => {
     const B = BATCH_0052;
     const attendance = new PostgresAttendanceRepository(db);
     const tech = asUserId(IDS.technician);
@@ -654,15 +666,18 @@ describePhase('rollback compatibility — phase 2: the live release (42e71fc) ag
       updatedBy: tech, updatedAt: '2028-02-04T08:00:00.000Z',
     });
     expect(saved.overtimeHours).toBe(1);
+    // 0056 replaced the one-current-row-per-dates key its ON CONFLICT names: the live submit is refused, writing nothing.
+    // The rollback limitation recorded in docs/payroll-forms.md (v1.8.0 → v1.7.1): nothing is submitted until rolled forward.
     const before = await db.execute<{ n: string }>(sql`select count(*)::text as n from timesheet_periods`);
-    const sent = await attendance.submitPeriod({
-      id: '00000000-0000-4000-8000-000000000ce1', userId: tech, from: '2028-03-01', to: '2028-03-25', comment: '',
-      updatedBy: tech, updatedAt: '2028-03-26T08:00:00.000Z', submittedAt: '2028-03-26T08:00:00.000Z', submittedBy: tech,
-      snapshot: { technicianName: 'Sipho', from: '2028-03-01', to: '2028-03-25', comment: '', entries: [] },
-    });
-    expect(sent?.id).toBe('00000000-0000-4000-8000-000000000ce1');
+    await expect(
+      attendance.submitPeriod({
+        id: '00000000-0000-4000-8000-000000000ce1', userId: tech, from: '2028-03-01', to: '2028-03-25', comment: '',
+        updatedBy: tech, updatedAt: '2028-03-26T08:00:00.000Z', submittedAt: '2028-03-26T08:00:00.000Z', submittedBy: tech,
+        snapshot: { technicianName: 'Sipho', from: '2028-03-01', to: '2028-03-25', comment: '', entries: [] },
+      }),
+    ).rejects.toThrow();
     const after = await db.execute<{ n: string }>(sql`select count(*)::text as n from timesheet_periods`);
-    expect(Number(after[0]?.n)).toBe(Number(before[0]?.n) + 1);
+    expect(after[0]?.n).toBe(before[0]?.n);
   });
 
   /*
@@ -686,39 +701,51 @@ describePhase('rollback compatibility — phase 2: the live release (42e71fc) ag
   });
 
   /*
-   * 0055 (FORM-WITHDRAW-1). The live code (v1.7.0) knows nothing of a withdrawal. Rolled back to, it reads the
-   * completed forms — the withdrawn one and its correction included — and the DATABASE keeps it safe: it can never
-   * submit a withdrawn form (the guard), and its Completed is refused with nothing written (its insert names the
-   * one-form-awaiting key as 0054 built it; 0055 rebuilt it to leave withdrawn forms out). Recorded as the rollback
-   * limitation in docs/deploy-next-release.md: under v1.7.0 a form is not completed until the release is rolled forward.
+   * 0055 (FORM-WITHDRAW-1). The live code (v1.7.1) wrote these rows itself: it reads the withdrawn form and its
+   * correction, and the database still never lets a withdrawn form be submitted.
    */
-  it('meets the 0055 rows: reads a withdrawn form and its correction; can never submit the withdrawn one; its Completed writes nothing', async () => {
+  it('meets the 0055 rows: reads a withdrawn form and its correction; a withdrawn form is never marked submitted', async () => {
     const B = BATCH_0055;
     const tech = asUserId(IDS.technician);
     const payroll = new PostgresPayrollRepository(db);
     const ids = (await payroll.listFormCompletions(tech)).map((form) => form.id);
     expect(ids).toContain(B.withdrawn);
     expect(ids).toContain(B.correction);
-    const before = await db.execute<{ n: string }>(sql`select count(*)::text as n from payroll_form_completions`);
-    await payroll.createPayrollSubmission({
-      id: B.submission, userId: tech, from: '2028-07-01', to: '2028-07-25', financeMonth: '2028-07', timesheetRequired: false, timesheetPeriodId: null,
-      attendance: { technicianName: 'Sipho', from: '2028-07-01', to: '2028-07-25', days: [] },
-      fileNames: { timesheet: '', attendance: 'Sipho attendance.pdf' }, documents: [],
-      submittedAt: '2028-07-26T08:00:00.000Z', submittedBy: tech, supersededAt: null, supersededBy: null, supersededBySubmission: null,
-    });
-    await expect(payroll.markFormsSubmitted([B.withdrawn], B.submission)).rejects.toThrow();
-    await expect(
-      payroll.createFormCompletion({
-        id: '00000000-0000-4000-8000-000000000eb1', userId: tech, kind: 'timesheet', from: '2028-08-01', to: '2028-08-25', fileName: 'Sipho timesheet.pdf',
-        timesheet: { comment: '', entries: [] }, attendance: null,
-        document: { kind: 'timesheet', fileName: 'Sipho timesheet.pdf', storageKey: 'payroll-completions/probe55/timesheet.pdf', sha256: 'd'.repeat(64), sizeBytes: 10, pageCount: 1 },
-        completedAt: '2028-08-26T08:00:00.000Z', completedBy: tech, submissionId: null,
-      }),
-    ).rejects.toThrow();
-    const after = await db.execute<{ n: string }>(sql`select count(*)::text as n from payroll_form_completions`);
-    expect(after[0]?.n).toBe(before[0]?.n);
+    expect((await payroll.listCorrectionDrafts(tech)).map((draft) => draft.withdrawnId)).toContain(B.withdrawn);
+    await expect(payroll.markFormsSubmitted([B.withdrawn], BATCH_0054.submission)).rejects.toThrow();
     const [withdrawn] = await db.execute<{ submission_id: string | null; withdrawn_at: string | null }>(sql`select submission_id, withdrawn_at from payroll_form_completions where id = ${B.withdrawn}`);
     expect(withdrawn?.submission_id ?? null).toBeNull();
     expect(withdrawn?.withdrawn_at).not.toBeNull();
+  });
+
+  /*
+   * 0056 (REPEAT-DATES-1). The live code (v1.7.1) has never seen two CURRENT submissions with the same dates. Rolled
+   * back to, it READS them — both payroll submissions, both sent timesheets, each with its own line — and the
+   * database keeps it safe: its Submit to Office names the one-current-row-per-dates keys 0056 replaced, so it is
+   * refused with nothing written (the limitation recorded in docs/payroll-forms.md), and the line ledger refuses a
+   * line already submitted whatever writes it.
+   */
+  it('meets the 0056 rows: reads two current submissions with the same dates; its payroll submit is refused, writing nothing', async () => {
+    const B = BATCH_0056;
+    const tech = asUserId(IDS.technician);
+    const payroll = new PostgresPayrollRepository(db);
+    const attendance = new PostgresAttendanceRepository(db);
+    const submissions = (await payroll.listPayrollSubmissionsFor(tech)).filter((submission) => submission.from === B.from && submission.to === B.to);
+    expect(submissions.map((submission) => submission.id).sort()).toEqual([B.firstSubmission, B.secondSubmission].sort());
+    const periods = await attendance.listSubmittedPeriods(tech, B.from, B.to);
+    expect(periods.map((period) => period.id).sort()).toEqual([B.firstPeriod, B.secondPeriod].sort());
+    expect(periods.map((period) => period.snapshot?.entries.map((entry) => entry.id)).sort()).toEqual([[B.firstLine], [B.secondLine]].sort());
+    expect(await attendance.findPeriod(tech, B.from, B.to)).not.toBeNull();
+    const before = await db.execute<{ n: string }>(sql`select count(*)::text as n from payroll_submissions`);
+    await expect(
+      payroll.createPayrollSubmission({
+        id: '00000000-0000-4000-8000-000000000fd1', userId: tech, from: '2028-10-01', to: '2028-10-25', financeMonth: '2028-10', timesheetRequired: false, timesheetPeriodId: null,
+        attendance: { technicianName: 'Sipho', from: '2028-10-01', to: '2028-10-25', days: [] },
+        fileNames: { timesheet: '', attendance: 'Sipho attendance.pdf' }, documents: [],
+        submittedAt: '2028-10-26T08:00:00.000Z', submittedBy: tech, supersededAt: null, supersededBy: null, supersededBySubmission: null,
+      }),
+    ).rejects.toThrow();
+    const after = await db.execute<{ n: string }>(sql`select count(*)::text as n from payroll_submissions`);
+    expect(after[0]?.n).toBe(before[0]?.n);
   });
 });

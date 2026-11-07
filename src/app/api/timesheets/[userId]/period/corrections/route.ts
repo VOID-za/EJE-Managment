@@ -17,6 +17,8 @@ export const POST = writeRoute({
     .object({
       from: day,
       to: day,
+      // REPEAT-DATES-1: the very submission corrected (several may share the dates).
+      periodId: z.string().min(1).max(100).optional(),
       reason: z.string().max(TIMESHEET_CORRECTION_REASON_LIMIT + 100),
       comment: z.string().max(TIMESHEET_PERIOD_COMMENT_LIMIT + 100),
       lines: z.array(timesheetLineSchema).max(TIMESHEET_CORRECTION_MAX_LINES),

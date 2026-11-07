@@ -107,16 +107,17 @@ describe('payroll forms over HTTP', () => {
     expect((await (await signedInAs(DEMO_USERS.coordinator)).download(`/api/payroll/submissions/${first.data.submission.id}/attendance/pdf`)).status).toBe(200);
   });
 
-  it('dates already submitted cannot be completed again, in part or whole; the two old submission points are retired', async () => {
+  it('dates already submitted may be completed and submitted again — a separate submission (REPEAT-DATES-1); the two old submission points stay retired', async () => {
     const technician = await signedInAs(DEMO_USERS.technician);
-    expect((await submitForms(technician, SIPHO, FROM, TO)).status).toBe(200);
-    // Days 20–28 are only part of the month submitted: refused, even with the replacement confirmed.
-    const partial = await submitForms(technician, SIPHO, `${MONTH}-20`, `${MONTH}-28`, { confirmReplace: true });
-    expect(partial.status).toBe(422);
-    expect(partial.error?.violations[0]?.code).toBe('payroll_period_submitted');
-    const cut = await technician.get<{ partialOverlaps: readonly unknown[]; canSubmit: boolean }>(`/api/payroll/forms/${SIPHO}?from=${MONTH}-20&to=${monthBounds(monthOfDate(businessToday())).from}`);
-    expect(cut.data.partialOverlaps).toHaveLength(1);
-    expect(cut.data.canSubmit).toBe(false);
+    const first = await submitForms(technician, SIPHO, FROM, TO);
+    expect(first.status).toBe(200);
+    const shared = await technician.get<{ repeats: readonly { id: string }[]; canSubmit: boolean }>(`/api/payroll/forms/${SIPHO}?from=${MONTH}-20&to=${MONTH}-28`);
+    expect(shared.data.repeats.map((repeat) => repeat.id)).toEqual([first.data.submission.id]);
+    expect(shared.data.canSubmit).toBe(true);
+    // Days 20–28 are part of the month submitted: accepted, as a submission of their own.
+    const partial = await submitForms(technician, SIPHO, `${MONTH}-20`, `${MONTH}-28`);
+    expect(partial.status, JSON.stringify(partial.error)).toBe(200);
+    expect(partial.data.submission.id).not.toBe(first.data.submission.id);
     for (const path of [`/api/timesheets/${SIPHO}/period/submit`, `/api/payroll/${SIPHO}/${MONTH}/submit`]) {
       const answer = await technician.post(path, { from: FROM, to: TO, confirmUnrecorded: true });
       expect(answer.status, path).toBe(422);

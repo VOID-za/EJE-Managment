@@ -9,7 +9,7 @@ import { IDS, jobFixture, seedBaseline } from '@/data/postgres/test-fixtures';
 import { PostgresDocumentRepository } from '@/data/postgres/document-repository';
 import { PostgresJobRepository } from '@/data/postgres/job-repository';
 import { asDocumentId, asUserId, type DocumentTextIndex, type TechnicalDocument } from '@/domain';
-import { ROLLBACK_0047, ROLLBACK_0048, ROLLBACK_0049, ROLLBACK_0050, ROLLBACK_0051, ROLLBACK_0052, ROLLBACK_0054, ROLLBACK_0055, ROLLBACK_DOCUMENTS, ROLLBACK_INTEGRATIONS, ROLLBACK_TIMESHEET } from './rollback-fixture';
+import { ROLLBACK_0047, ROLLBACK_0048, ROLLBACK_0049, ROLLBACK_0050, ROLLBACK_0051, ROLLBACK_0052, ROLLBACK_0054, ROLLBACK_0055, ROLLBACK_0056, ROLLBACK_DOCUMENTS, ROLLBACK_INTEGRATIONS, ROLLBACK_TIMESHEET } from './rollback-fixture';
 import { asAttachmentId, asLineItemId } from '@/domain';
 import { PostgresStandbyRepository } from '@/data/postgres/standby-repository';
 import { PostgresCustomerRepository } from '@/data/postgres/customer-repository';
@@ -610,5 +610,39 @@ describePhase('rollback compatibility — phase 1: this release migrates to 0030
     expect(await payroll.completeCorrectionDraft(B.draft, B.correction)).toBe(true);
     const rows = await db.execute<{ n: string }>(sql`select count(*)::text as n from payroll_form_completions where id in (${B.withdrawn}, ${B.correction})`);
     expect(rows[0]?.n).toBe('2');
+  });
+
+  it('writes the rows only this release can (0056): two current submissions with the very same dates, each with its own line', async () => {
+    const B = ROLLBACK_0056;
+    const tech = asUserId(IDS.technician);
+    const attendance = new PostgresAttendanceRepository(db);
+    const payroll = new PostgresPayrollRepository(db);
+    const at = '2028-09-26T08:00:00.000Z';
+    for (const [period, submission, lineId, tag] of [
+      [B.firstPeriod, B.firstSubmission, B.firstLine, 'first'],
+      [B.secondPeriod, B.secondSubmission, B.secondLine, 'second'],
+    ] as const) {
+      const line = await attendance.saveEntry({
+        id: lineId, userId: tech, date: '2028-09-10', customerId: null, customerName: `Rollback probe 0056 ${tag}`, workshop: false,
+        normalHours: 0, overtimeHours: 1, doubleHours: 0, callouts: 0, calloutAmount: 0, calloutShared: false, internalKm: 0, customerKm: 0,
+        updatedBy: tech, updatedAt: at,
+      });
+      expect(
+        await attendance.submitPeriod({
+          id: period, userId: tech, from: B.from, to: B.to, comment: '', updatedBy: tech, updatedAt: at, submittedAt: at, submittedBy: tech,
+          snapshot: { technicianName: 'Sipho', from: B.from, to: B.to, comment: '', entries: [line] },
+        }),
+      ).not.toBeNull();
+      expect(
+        await payroll.createPayrollSubmission({
+          id: submission, userId: tech, from: B.from, to: B.to, financeMonth: '2028-09', timesheetRequired: true, timesheetPeriodId: period,
+          attendance: { technicianName: 'Sipho', from: B.from, to: B.to, days: [] },
+          fileNames: { timesheet: `Sipho timesheet ${tag}.pdf`, attendance: `Sipho attendance ${tag}.pdf` }, documents: [],
+          submittedAt: at, submittedBy: tech, supersededAt: null, supersededBy: null, supersededBySubmission: null,
+        }),
+      ).not.toBeNull();
+    }
+    const ledger = await db.execute<{ n: string }>(sql`select count(*)::text as n from timesheet_submitted_lines where entry_id in (${B.firstLine}, ${B.secondLine})`);
+    expect(ledger[0]?.n).toBe('2');
   });
 });

@@ -65,6 +65,8 @@ const refuse = (message: string, code: string, detail: string): WorkflowError =>
 export interface TimesheetCorrectionInput {
   readonly from: string;
   readonly to: string;
+  /** REPEAT-DATES-1: the very submission corrected — several may share From and To. */
+  readonly periodId?: string | undefined;
   readonly reason: string;
   readonly comment: string;
   /**
@@ -93,11 +95,13 @@ const sameVersion = (
   b: Pick<TimesheetSubmissionSnapshot, 'comment' | 'entries'>,
 ): boolean => describeCorrectionChanges(a, b).length === 0;
 
-const findSentPeriod = async (context: OperationContext, technicianId: UserId, from: string, to: string) => {
+const findSentPeriod = async (context: OperationContext, technicianId: UserId, from: string, to: string, periodId?: string) => {
   if (!isCalendarDate(from) || !isCalendarDate(to)) {
     throw refuse('That is not a date range.', 'invalid_date', 'Give both days as YYYY-MM-DD.');
   }
-  const period = await context.repos.attendance.findPeriod(technicianId, from, to);
+  const byId = periodId === undefined ? null : await context.repos.attendance.findPeriodById(periodId);
+  // Somebody else's, or one for other dates, is refused exactly like one never sent.
+  const period = periodId === undefined ? await context.repos.attendance.findPeriod(technicianId, from, to) : byId !== null && byId.userId === technicianId && byId.from === from && byId.to === to ? byId : null;
   // TS-PAPER-8: a submission a later one replaced is history — it is read, never corrected.
   if (period !== null && (period.supersededAt ?? null) !== null) {
     throw refuse(
@@ -135,7 +139,7 @@ export const requestTimesheetCorrection = async (
     );
   }
   assertKeepsTimesheet(context);
-  const period = await findSentPeriod(context, id, input.from, input.to);
+  const period = await findSentPeriod(context, id, input.from, input.to, input.periodId);
   const reason = input.reason.trim();
   if (reason.length === 0) {
     throw refuse('Say why the timesheet needs correcting.', 'correction_reason_required', 'The reason is part of the record.');

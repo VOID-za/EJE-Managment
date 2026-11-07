@@ -5,7 +5,6 @@ import { renderTimesheetPdf } from '@/services/simulated/timesheet-pdf';
 import {
   listTimesheetSubmissions,
   loadSubmissionDocument,
-  loadWorkingTimesheet,
   saveTimesheetEntry,
   submitTimesheetPeriod,
 } from './timesheets';
@@ -17,9 +16,10 @@ import { buildHarness, seedUser, type Harness } from './test-harness';
 /**
  * TS-PAPER-6…8 — THE FOLLOW-UP TO v1.1.0 (the owner, 4 November 2026).
  *
- *   7. A submission never drops a day: dates covering only PART of a current
- *      submission are refused; dates covering ALL of it replace it only when
- *      confirmed; a corrected one is not replaced; the original stays.
+ *   7. (Replaced by REPEAT-DATES-1, 7 November 2026.) The same date may be in
+ *      several submitted timesheets; each LINE is in one only, and an earlier
+ *      submission is never replaced or rewritten. A v1.6.0 replacement already
+ *      stored is still read as it was.
  *   7. Finance prints every current submission ending in the month — a legacy
  *      calendar-month timesheet too, until a covering submission replaces it —
  *      so every submitted line is printed once, none missing, none twice.
@@ -43,15 +43,9 @@ beforeEach(async () => {
 
 const add = (date: string, tag: string, overtimeHours = 1) =>
   saveTimesheetEntry(harness.as(sipho), SIPHO, { date, customerName: tag, overtimeHours, doubleHours: 0 });
-const submit = (from: string, to: string, replace = false) => submitTimesheetPeriod(harness.as(sipho), SIPHO, from, to, { replace });
+const submit = (from: string, to: string) => submitTimesheetPeriod(harness.as(sipho), SIPHO, from, to);
 const tagsOf = async (id: string, version: 'current' | 'original' = 'current') =>
   (await loadSubmissionDocument(harness.as(master), id, version)).rows.map((row) => row.customer).sort();
-/** Everything stored about Sipho's timesheets, to prove a refusal changed nothing. */
-const state = async () => ({
-  periods: (await harness.repos.attendance.listSubmissions(SIPHO)).map((period: TimesheetPeriod) => [period.id, period.from, period.to, period.supersededAt ?? null, period.snapshot]),
-  entries: await harness.repos.attendance.listEntries(SIPHO, '2000-01-01', '2099-12-31'),
-  audit: (await harness.repos.activity.list()).length,
-});
 /** The month's Finance package: the attendance submitted, prepared, every timesheet attachment read, then discarded. */
 const packageOf = async (month: string) => {
   // A month submitted before PAYROLL-ONE-1 is never submitted again (0052).
@@ -67,74 +61,93 @@ const packageOf = async (month: string) => {
   return { sheets, attendancePages, tags: sheets.flatMap((sheet) => sheet.tags).sort() };
 };
 
-describe('TS-PAPER-7 — a submission never drops a day', () => {
-  it('the owner’s example: 1–25 Nov submitted, then 20 Nov–15 Dec is REFUSED and nothing changes', async () => {
+/**
+ * A v1.6.0 REPLACEMENT, as production stores it (TS-PAPER-7 replaced a covered submission; REPEAT-DATES-1 retired
+ * that on 7 November 2026): the earlier periods marked replaced, and the replacement carrying every line of these
+ * dates. Seeded directly — no rule makes one any more.
+ */
+const seedReplacement = async (from: string, to: string): Promise<TimesheetPeriod> => {
+  const entries = await harness.repos.attendance.listEntries(SIPHO, from, to);
+  const at = '2027-01-27T06:00:00.000Z';
+  const replacement: TimesheetPeriod = {
+    id: `tsp-replacement-${from}`, userId: SIPHO, from, to, comment: '', updatedBy: SIPHO, updatedAt: at, submittedAt: at, submittedBy: SIPHO,
+    snapshot: { technicianName: 'Sipho Mahlangu', from, to, comment: '', entries }, supersededAt: null, supersededBy: null,
+  };
+  harness.seedHistory((draft) => {
+    draft.timesheetPeriods = [
+      ...draft.timesheetPeriods.map((row) =>
+        row.userId === SIPHO && row.submittedAt !== null && (row.supersededAt ?? null) === null && from <= row.from && row.to <= to ? { ...row, supersededAt: at, supersededBy: SIPHO } : row,
+      ),
+      replacement,
+    ];
+  });
+  return replacement;
+};
+
+describe('REPEAT-DATES-1 — the same date in more than one submitted timesheet; each LINE once', () => {
+  it('the owner’s example: 1–25 Nov submitted, then 20 Nov–15 Dec is ACCEPTED — the earlier one untouched, no line in both', async () => {
     await add('2026-11-05', 'L-1105');
     await add('2026-11-22', 'L-1122');
     await add('2026-12-10', 'L-1210');
     const existing = await submit('2026-11-01', '2026-11-25');
-    const before = await state();
-    for (const replace of [false, true]) {
-      await expect(submit('2026-11-20', '2026-12-15', replace)).rejects.toMatchObject({
-        message: expect.stringContaining('Sun 1 Nov 2026 – Wed 25 Nov 2026') as unknown,
-        violations: [{ code: 'timesheet_partial_overlap' }],
-      });
-    }
-    expect(await state()).toEqual(before);
-    expect(await tagsOf(existing.id)).toEqual(['L-1105', 'L-1122']);
-    // The way forward still works: start after it ends.
-    const next = await submit('2026-11-26', '2026-12-15');
-    expect(await tagsOf(next.id)).toEqual(['L-1210']);
-    expect((await listTimesheetSubmissions(harness.as(master), SIPHO)).map((row) => [row.label, row.current])).toEqual([
-      ['Thu 26 Nov 2026 – Tue 15 Dec 2026', true],
-      ['Sun 1 Nov 2026 – Wed 25 Nov 2026', true],
-    ]);
-  });
-
-  it('a submission inside another, and one straddling two, are refused too', async () => {
-    await add('2026-11-05', 'L-1105');
-    await submit('2026-11-01', '2026-11-25');
-    await submit('2026-11-26', '2026-12-25');
-    const before = await state();
-    await expect(submit('2026-11-10', '2026-11-15', true)).rejects.toMatchObject({ violations: [{ code: 'timesheet_partial_overlap' }] });
-    await expect(submit('2026-11-01', '2026-12-10', true)).rejects.toMatchObject({ violations: [{ code: 'timesheet_partial_overlap' }] });
-    expect(await state()).toEqual(before);
-  });
-
-  it('dates covering ALL of it replace it — only when confirmed — and every line it held is in the replacement', async () => {
-    await add('2026-11-05', 'L-1105');
-    await add('2026-11-22', 'L-1122');
-    const existing = await submit('2026-11-01', '2026-11-25');
-    await add('2026-12-10', 'L-1210');
-    const before = await state();
-    await expect(submit('2026-10-26', '2026-12-15')).rejects.toMatchObject({
-      message: expect.stringContaining('(2 lines)') as unknown,
-      violations: [{ code: 'timesheet_replace_unconfirmed' }],
-    });
-    expect(await state()).toEqual(before);
-    const replacement = await submit('2026-10-26', '2026-12-15', true);
-    // No submitted line leaves payroll coverage: all of the old snapshot's lines are in the new one.
-    expect(await tagsOf(replacement.id)).toEqual(['L-1105', 'L-1122', 'L-1210']);
     const kept = await harness.repos.attendance.findPeriodById(existing.id);
-    expect(kept?.supersededAt).toBeTruthy();
-    expect(kept?.snapshot).toEqual(existing.snapshot);
+    // A new line on 22 November — a date already submitted — is accepted for the next timesheet.
+    await add('2026-11-22', 'L-1122B');
+    const next = await submit('2026-11-20', '2026-12-15');
+    expect(next.id).not.toBe(existing.id);
+    expect(await tagsOf(next.id)).toEqual(['L-1122B', 'L-1210']);
+    expect(await tagsOf(existing.id)).toEqual(['L-1105', 'L-1122']);
+    // The earlier submission is exactly as it was: never replaced, never rewritten.
+    expect(await harness.repos.attendance.findPeriodById(existing.id)).toEqual(kept);
+    expect((await listTimesheetSubmissions(harness.as(master), SIPHO)).map((row) => [row.label, row.current, row.lineCount])).toEqual([
+      ['Fri 20 Nov 2026 – Tue 15 Dec 2026', true, 2],
+      ['Sun 1 Nov 2026 – Wed 25 Nov 2026', true, 2],
+    ]);
     const trail = (await harness.repos.activity.list()).filter((event) => event.type === 'timesheet_submitted');
-    expect(trail.some((event) => event.detail.includes('replaces the overlapping submission Sun 1 Nov 2026 – Wed 25 Nov 2026'))).toBe(true);
-    // Nothing of it is back on the open sheet: covered by the replacement.
-    expect((await loadWorkingTimesheet(harness.as(sipho), SIPHO)).entries).toEqual([]);
+    expect(trail.some((event) => event.detail.includes('repeat days of the submitted timesheet Sun 1 Nov 2026 – Wed 25 Nov 2026'))).toBe(true);
   });
 
-  it('a submission with a correction (pending or accepted) is not replaced: corrections stay the way to change it', async () => {
+  it('exactly the same dates again: a second submission of its own, with only the lines not yet submitted', async () => {
+    const first = await add('2026-11-05', 'L-1105');
+    const a = await submit('2026-11-01', '2026-11-25');
+    expect(await tagsOf(a.id)).toEqual(['L-1105']);
+    await add('2026-11-05', 'L-1105B');
+    const b = await submit('2026-11-01', '2026-11-25');
+    expect(b.id).not.toBe(a.id);
+    expect(await tagsOf(b.id)).toEqual(['L-1105B']);
+    expect(await tagsOf(a.id)).toEqual(['L-1105']);
+    // A submitted line is never changed, moved or removed — whatever date is open now.
+    await expect(
+      saveTimesheetEntry(harness.as(sipho), SIPHO, { entryId: first.id, date: '2026-11-05', customerName: 'L-1105', overtimeHours: 5, doubleHours: 0 }),
+    ).rejects.toMatchObject({ violations: [{ code: 'timesheet_line_submitted' }] });
+    // Nothing left: a third submission of these dates carries no line at all.
+    expect(await tagsOf((await submit('2026-11-01', '2026-11-25')).id)).toEqual([]);
+  });
+
+  it('the same LINE is never in two submissions: the store refuses it (as the database’s line ledger does)', async () => {
+    const line = await add('2026-11-05', 'L-1105');
+    const sent = await submit('2026-11-01', '2026-11-25');
+    await expect(
+      harness.repos.attendance.submitPeriod({
+        ...sent, id: 'tsp-twice', submittedAt: '2027-01-27T07:00:00.000Z',
+        snapshot: { technicianName: 'Sipho Mahlangu', from: '2026-11-01', to: '2026-11-25', comment: '', entries: [line] },
+      }),
+    ).rejects.toThrow(/already in a submitted timesheet/u);
+    expect((await harness.repos.attendance.listSubmissions(SIPHO)).map((period) => period.id)).toEqual([sent.id]);
+  });
+
+  it('a corrected submission keeps its correction: a later submission of the same dates never carries its lines', async () => {
     const line = await add('2026-11-05', 'L-1105');
     const existing = await submit('2026-11-01', '2026-11-25');
     const correction = await requestTimesheetCorrection(harness.as(sipho), SIPHO, {
-      from: '2026-11-01', to: '2026-11-25', reason: 'OT was 2', comment: '',
+      from: '2026-11-01', to: '2026-11-25', periodId: existing.id, reason: 'OT was 2', comment: '',
       lines: [{ entryId: line.id, date: '2026-11-05', customerName: 'L-1105', overtimeHours: 2, doubleHours: 0 }],
     });
-    await expect(submit('2026-10-26', '2026-12-15', true)).rejects.toMatchObject({ violations: [{ code: 'timesheet_replace_corrected' }] });
     await decideTimesheetCorrection(harness.as(coordinator), SIPHO, correction.id, { decision: 'accept' });
-    await expect(submit('2026-10-26', '2026-12-15', true)).rejects.toMatchObject({ violations: [{ code: 'timesheet_replace_corrected' }] });
+    const later = await submit('2026-10-26', '2026-12-15');
+    expect(await tagsOf(later.id)).toEqual([]);
     expect((await harness.repos.attendance.findPeriodById(existing.id))?.supersededAt ?? null).toBeNull();
+    expect((await loadSubmissionDocument(harness.as(master), existing.id)).rows.map((row) => row.overtimeHours)).toEqual([2]);
   });
 });
 
@@ -160,7 +173,7 @@ describe('TS-PAPER-8 — the original is always readable; a replaced submission 
     // A second submission, replaced by one covering it: its original stays readable, marked replaced.
     await add('2026-11-20', 'L-1120');
     const replaced = await submit('2026-11-15', '2026-11-25');
-    await submit('2026-11-11', '2026-11-30', true);
+    await seedReplacement('2026-11-11', '2026-11-30');
     for (const reader of [sipho, master]) {
       const original = await loadSubmissionDocument(harness.as(reader), replaced.id, 'original');
       expect(original.rows.map((row) => row.customer)).toEqual(['L-1120']);
@@ -204,8 +217,8 @@ describe('TS-PAPER-7 — Finance: every submitted line once, none missing, none 
   it('a legacy calendar month REPLACED by a payday submission covering it is never printed beside it', async () => {
     for (const [date, tag] of [['2026-09-28', 'L-0928'], ['2026-10-05', 'L-1005'], ['2026-10-28', 'L-1028'], ['2026-11-20', 'L-1120']] as const) await add(date, tag);
     const legacy = await legacyMonth('2026-10', '2026-10-31');
-    // 26 Sep – 25 Nov covers every day of October: confirmed, it replaces the calendar month.
-    await submit('2026-09-26', '2026-11-25', true);
+    // 26 Sep – 25 Nov covered every day of October: under v1.6.0, confirmed, it replaced the calendar month.
+    await seedReplacement('2026-09-26', '2026-11-25');
     const october = await packageOf('2026-10');
     const november = await packageOf('2026-11');
     expect(october.sheets).toEqual([]);

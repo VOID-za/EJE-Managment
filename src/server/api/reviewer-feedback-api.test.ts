@@ -53,8 +53,8 @@ describe('timesheet Send to office over HTTP, for a chosen From/To period (TS-02
     const sent = await submitForms<{ period: { id: string; submittedAt: string; from: string; to: string; snapshot: { comment: string } } }>(technician, 'user-tech-sipho', from, today);
     expect(sent.status, JSON.stringify(sent.error)).toBe(200);
     expect(sent.data.period).toMatchObject({ from, to: today, snapshot: { comment: 'Bench days.' } });
-    // The same dates again: refused unless the replacement is confirmed — never overwritten.
-    expect((await submitForms(technician, 'user-tech-sipho', from, today)).status).toBe(422);
+    // Submit to Office again with nothing newly completed: refused — what was submitted is never submitted twice.
+    expect((await technician.post('/api/payroll/forms/user-tech-sipho/submit', {})).error?.violations[0]?.code).toBe('payroll_already_submitted');
     // The old Submit on the Timesheets page is retired.
     expect((await technician.post('/api/timesheets/user-tech-sipho/period/submit', { from, to: today })).status).toBe(422);
     // The future line stays on the sheet for the next period; the comment is cleared.

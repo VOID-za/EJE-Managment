@@ -223,10 +223,8 @@ export class PostgresPayrollRepository implements PayrollRepository {
         submittedAt: submission.submittedAt,
         submittedBy: submission.submittedBy,
       })
-      .onConflictDoNothing({
-        target: [schema.payrollSubmissions.userId, schema.payrollSubmissions.periodFrom, schema.payrollSubmissions.periodTo],
-        where: isNull(schema.payrollSubmissions.supersededAt),
-      })
+      // 0056 (REPEAT-DATES-1): submissions may share dates. A retry is one row by its id (and its timesheet period's key).
+      .onConflictDoNothing()
       .returning();
     return rows[0] === undefined ? null : toPayrollSubmission(rows[0]);
   }

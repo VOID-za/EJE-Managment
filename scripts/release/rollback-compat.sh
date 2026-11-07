@@ -1,6 +1,7 @@
 #!/bin/bash
-# ROLLBACK COMPATIBILITY: the live release (38b75cd, v1.7.0) against a database this
-# release has migrated to its newest migration (0055, withdrawn forms and their corrections). Moved to the live
+# ROLLBACK COMPATIBILITY: the live release (55e1d06, v1.7.1) against a database this
+# release has migrated to its newest migration (0056, repeated dates and the submitted-line ledger). Moved to the live
+# 55e1d06 (v1.7.1) and migration 0056 on 7 November 2026 (REPEAT-DATES-1, v1.8.0). Moved to the live
 # 38b75cd (v1.7.0) and migration 0055 on 6 November 2026 (FORM-WITHDRAW-1, v1.7.1). Moved to the live
 # 42e6bd4 (v1.6.0) and migration 0054 on 6 November 2026 (FORM-LIFECYCLE-1). Moved to the live
 # 835eaaa (v1.5.2) on 6 November 2026 for the Timesheets day blocks (v1.6.0), which add no migration. Moved to the live
@@ -49,7 +50,7 @@
 # reach the VPS.
 set -euo pipefail
 
-LIVE=${LIVE_COMMIT:-38b75cd8d488d99d449057c20c726a2a58f3f250}
+LIVE=${LIVE_COMMIT:-55e1d063baa2c521551ab993cfc6b9376a7c9621}
 : "${TEST_DATABASE_URL:?TEST_DATABASE_URL must name a disposable test database}"
 
 root=$(git rev-parse --show-toplevel)

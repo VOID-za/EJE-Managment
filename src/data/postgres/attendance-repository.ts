@@ -365,8 +365,10 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
         commentedAt: period.updatedAt,
       })
       .onConflictDoUpdate({
+        // 0056 (REPEAT-DATES-1): the arbiter is one UNSENT row per person and dates. A sent row with the same dates is
+        // another submission: never this row, never changed here.
         target: [schema.timesheetPeriods.userId, schema.timesheetPeriods.periodFrom, schema.timesheetPeriods.periodTo],
-        targetWhere: isNull(schema.timesheetPeriods.supersededAt),
+        targetWhere: and(isNull(schema.timesheetPeriods.supersededAt), isNull(schema.timesheetPeriods.submittedAt)),
         set: {
           comment: period.comment,
           updatedBy: period.updatedBy,
@@ -516,8 +518,10 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
         snapshot: period.snapshot,
       })
       .onConflictDoUpdate({
+        // 0056 (REPEAT-DATES-1): the arbiter is one UNSENT row per person and dates. A sent row with the same dates is
+        // another submission: never this row, never changed here.
         target: [schema.timesheetPeriods.userId, schema.timesheetPeriods.periodFrom, schema.timesheetPeriods.periodTo],
-        targetWhere: isNull(schema.timesheetPeriods.supersededAt),
+        targetWhere: and(isNull(schema.timesheetPeriods.supersededAt), isNull(schema.timesheetPeriods.submittedAt)),
         set: {
           submittedAt: period.submittedAt,
           submittedBy: period.submittedBy,

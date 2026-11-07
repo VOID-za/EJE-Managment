@@ -489,8 +489,15 @@ await check('E. only the attendance completed: disabled — "Timesheet form not 
 /* ---- F. History ---------------------------------------------------------- */
 await check('F. History: the submission, read only, its documents previewed; nothing submitted before changed', async () => {
   await myForms();
-  const row = page.locator(`[data-testid="my-monthly-history-row"][data-from="${FROM}"][data-to="${TO}"]`);
+  // HISTORY-ONE-1: one row per submitted form — the timesheet and the attendance of the submission, side by side.
+  const row = page.locator(`[data-testid="my-monthly-history-form"][data-kind="timesheet"][data-from="${FROM}"][data-to="${TO}"]`);
   await row.waitFor({ timeout: 20000 });
+  await page.locator(`[data-testid="my-monthly-history-form"][data-kind="attendance"][data-from="${FROM}"][data-to="${TO}"]`).waitFor({ timeout: 10000 });
+  // Newest submitted first.
+  const stamps = await page.locator('[data-testid="my-monthly-history-form"]').evaluateAll((rows) => rows.map((element) => element.getAttribute('data-submitted-at') ?? ''));
+  if (stamps.some((stamp, index) => index > 0 && stamp > stamps[index - 1])) fail('the History is not newest first');
+  // One History: no separate submitted-timesheet or submitted-attendance section, and no office list here.
+  for (const gone of ['my-submitted-timesheets', 'timesheet-office']) if ((await page.getByTestId(gone).count()) !== 0) fail(`My Monthly Forms still shows ${gone}`);
   for (const word of [/edit/iu, /delete/iu, /reopen/iu, /resubmit/iu, /modify/iu]) {
     if ((await page.getByTestId('my-monthly-history').getByRole('button', { name: word }).count()) !== 0) fail(`the history offers ${word}`);
   }
@@ -524,7 +531,7 @@ await check('F. another technician sees and changes none of it', async () => {
     if (pdf < 400) fail(`Sipho's completed PDF answered ${pdf}`);
   }
   await myForms();
-  if ((await page.locator('[data-testid="my-monthly-history-row"]').count()) !== 0) fail('Riaan sees a history');
+  if ((await page.locator('[data-testid="my-monthly-history-form"]').count()) !== 0) fail('Riaan sees a history');
 });
 
 await check('the Office keeps no timesheet: "Not required"; attendance completed alone is ready to submit, and goes alone', async () => {

@@ -170,26 +170,26 @@ describe('TS-16 — asking for a correction', () => {
     expect((await harness.repos.notifications.list(riaan.id)).some((n) => n.type === 'timesheet_correction_requested')).toBe(false);
   });
 
-  it('a submission and its corrections are never removed: the same dates again are refused; overlapping dates replace it and KEEP it (TS-PAPER)', async () => {
+  it('a submission and its corrections are never removed: later submissions sharing its dates are their own and leave it exactly as it is (REPEAT-DATES-1)', async () => {
     const { first, second } = await sendPeriod();
     await ask(correctedLines(first, second));
     const period = (await harness.repos.attendance.findPeriod(SIPHO, FROM, TO))!;
     expect(await harness.repos.attendance.listCorrections(period.id)).toHaveLength(1);
-    // FORM-LIFECYCLE-1: nothing is added to submitted dates — a change is a correction.
-    await expect(saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(4)))).rejects.toMatchObject({ violations: [{ code: 'form_submitted' }] });
-    // Was RESUBMIT-1, which overwrote the snapshot and deleted the corrections.
-    await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO)).rejects.toMatchObject({ violations: [{ code: 'timesheet_already_submitted' }] });
-    expect(await harness.repos.attendance.listCorrections(period.id)).toHaveLength(1);
-    expect((await harness.repos.attendance.findPeriod(SIPHO, FROM, TO))?.snapshot).toEqual(period.snapshot);
-    // TS-PAPER-7: dates covering only part of it are refused; dates covering all of it are refused too
-    // while it carries a correction (replacing it from the sheet's lines would undo the correction).
-    await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, day(4), day(1))).rejects.toMatchObject({ violations: [{ code: 'timesheet_partial_overlap' }] });
-    await expect(submitTimesheetPeriod(harness.as(sipho), SIPHO, day(8), day(0), { replace: true })).rejects.toMatchObject({ violations: [{ code: 'timesheet_replace_corrected' }] });
-    const kept = await harness.repos.attendance.findPeriod(SIPHO, FROM, TO);
+    // A submitted line is never changed — a change is a correction; a NEW line on its date is the next sheet's.
+    await expect(saveTimesheetEntry(harness.as(sipho), SIPHO, { ...line(day(4)), entryId: first.id })).rejects.toMatchObject({ violations: [{ code: 'timesheet_line_submitted' }] });
+    const later = await saveTimesheetEntry(harness.as(sipho), SIPHO, line(day(4)));
+    // Was RESUBMIT-1, which overwrote the snapshot and deleted the corrections: now another submission beside it.
+    const same = await submitTimesheetPeriod(harness.as(sipho), SIPHO, FROM, TO);
+    expect(same.snapshot?.entries.map((entry) => entry.id)).toEqual([later.id]);
+    const part = await submitTimesheetPeriod(harness.as(sipho), SIPHO, day(4), day(1));
+    const all = await submitTimesheetPeriod(harness.as(sipho), SIPHO, day(8), day(0));
+    // None of them carries a line of the corrected submission, nor touches it or its correction.
+    expect([part.snapshot?.entries, all.snapshot?.entries]).toEqual([[], []]);
+    const kept = await harness.repos.attendance.findPeriodById(period.id);
     expect(kept?.supersededAt ?? null).toBeNull();
     expect(kept?.snapshot).toEqual(period.snapshot);
     expect(await harness.repos.attendance.listCorrections(period.id)).toHaveLength(1);
-    expect((await harness.repos.attendance.listSubmittedPeriods(SIPHO, FROM, TO)).map((current) => current.id)).toEqual([period.id]);
+    expect((await harness.repos.attendance.listSubmittedPeriods(SIPHO, FROM, TO)).map((current) => current.id)).toContain(period.id);
   });
 });
 

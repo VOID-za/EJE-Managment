@@ -72,18 +72,20 @@ describe('TS-PAPER — the working timesheet, like the paper one', () => {
     expect(neither).toMatchObject({ workshop: false, customerName: '' });
   });
 
-  it('5. a date outside the current pay period: before it is recorded; inside one already submitted is refused (FORM-LIFECYCLE-1)', async () => {
+  it('5. a date outside the current pay period: before it is recorded; inside one already submitted it is ACCEPTED, for the next sheet (REPEAT-DATES-1)', async () => {
     onDay('2026-10-25');
     await add('2026-10-20');
     await submit('2026-09-26', '2026-10-25');
     onDay('2026-11-04');
-    // A day of the submitted period: read only now — a forgotten line is a correction of that timesheet.
-    await expect(add('2026-10-10')).rejects.toMatchObject({ violations: [{ code: 'form_submitted' }] });
+    // A day of the submitted period: a new line is accepted — it is the next timesheet's, never the submitted one's.
+    const repeated = await add('2026-10-10');
     const ancient = await add('2026-01-15');
     const sheet = await working();
+    // Only a suggestion: the day after the last submission.
     expect(sheet.suggested.from).toBe('2026-10-26');
-    expect(sheet.entries.map((entry) => entry.date)).not.toContain('2026-10-10');
-    expect(sheet.entries.find((entry) => entry.id === ancient.id)?.outsideSubmitted).toBeNull();
+    expect(sheet.entries.map((entry) => entry.id)).toEqual(expect.arrayContaining([repeated.id, ancient.id]));
+    // The submitted line is not on the working sheet: it is in its submission.
+    expect(sheet.entries.map((entry) => entry.date)).not.toContain('2026-10-20');
   });
 
   it('6. a future date', async () => {
@@ -201,10 +203,12 @@ describe('TS-PAPER — what the office receives, and how it is corrected', () =>
     const entry = await add('2026-11-02', { overtimeHours: 2, calloutAmount: 45000, internalKm: 10, customerKm: 37.5 });
     await saveWorkingTimesheetComment(harness.as(sipho), SIPHO, 'Shutdown week.');
     const sent = await submit('2026-10-26', '2026-11-04');
-    // Later work cannot reach it: the submitted dates are read only (FORM-LIFECYCLE-1).
+    // Later work cannot reach it: a submitted line is read only (REPEAT-DATES-1: held by the line).
     await expect(saveTimesheetEntry(harness.as(sipho), SIPHO, { ...line('2026-11-02', { overtimeHours: 9 }), entryId: entry.id })).rejects.toMatchObject({
-      violations: [{ code: 'form_submitted' }],
+      violations: [{ code: 'timesheet_line_submitted' }],
     });
+    // A new line on that date changes nothing in it either.
+    await add('2026-11-02', { overtimeHours: 4 });
     const listed = await listTimesheetSubmissions(harness.as(master));
     expect(listed.map((row) => [row.id, row.technicianName, row.from, row.to, row.lineCount, row.current])).toEqual([
       [sent.id, 'Sipho Mahlangu', '2026-10-26', '2026-11-04', 1, true],

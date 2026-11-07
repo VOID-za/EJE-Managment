@@ -184,9 +184,12 @@ describe('Submit to Office: both completed forms together, once — never one al
     expect(await stateOf()).toMatchObject({ readiness: 'none', timesheet: null, attendance: null });
     await refusedWith(submitCompletedForms(harness.as(sipho), SIPHO), 'payroll_already_submitted');
     expect((await listPayrollHistory(harness.as(sipho), SIPHO)).map((entry) => entry.id)).toEqual([submission.id]);
-    // Submitted: read only — and never completed or submitted again.
+    // Submitted: read only — its attendance days stay locked, and what was submitted is never submitted again.
     await refusedWith(present('2026-11-04'), 'form_submitted');
-    await refusedWith(complete('attendance'), 'payroll_period_submitted');
+    // REPEAT-DATES-1: the same dates may be completed again — a NEW form of its own; the submitted ones are untouched.
+    const again = await complete('attendance');
+    expect(again.id).not.toBe(submission.id);
+    expect((await harness.repos.payroll.listFormCompletions(SIPHO)).filter((form) => form.submissionId === submission.id)).toHaveLength(2);
   });
 
   it('a form changed after it was completed (somehow) is refused at Submit: nothing is submitted, both still wait', async () => {
@@ -211,11 +214,13 @@ describe('Submit to Office: both completed forms together, once — never one al
     expect(submission.documents.map((document) => document.kind)).toEqual(['attendance']);
   });
 
-  it('another person’s completed form is not readable to a technician; the office reads it', async () => {
+  it('another person’s completed form is read by nobody — a technician, a Senior Tech or the Office (FORMS-OWN-1)', async () => {
     const form = await complete('attendance');
-    await refusedWith(loadCompletedFormPdf(harness.as(riaan), form.id), 'form_not_found');
-    await expect(loadCompletedFormPdf(harness.as(master), form.id)).resolves.toMatchObject({ fileName: form.fileName });
-    await refusedWith(loadMyCompletedForms(harness.as(riaan), SIPHO), 'not_permitted');
+    await expect(loadCompletedFormPdf(harness.as(sipho), form.id)).resolves.toMatchObject({ fileName: form.fileName });
+    for (const reader of [riaan, master, coordinator]) {
+      await refusedWith(loadCompletedFormPdf(harness.as(reader), form.id), 'form_not_found');
+      await refusedWith(loadMyCompletedForms(harness.as(reader), SIPHO), 'not_permitted');
+    }
   });
 
   it('the next period starts the day after the forms completed or submitted', async () => {

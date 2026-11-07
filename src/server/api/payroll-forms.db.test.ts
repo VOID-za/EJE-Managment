@@ -99,21 +99,74 @@ describeDb('payroll forms on PostgreSQL (migration 0052)', () => {
     expect(forms.map((form) => form.submissionId)).toEqual([submission!.id, submission!.id]);
   });
 
-  it('dates already submitted cannot be completed again, in part or in whole: nothing changes', async () => {
+  it('REPEAT-DATES-1: dates already submitted are submitted again as SEPARATE submissions — in part, exactly, or around them; none replaced', async () => {
     const tech = await signIn('sipho@example-test.co.za');
-    await tech.post(`/api/timesheets/${IDS.technician}/lines`, { id: crypto.randomUUID(), date: '2026-11-05', typed: typed('1'), expectedRevision: null });
+    await tech.post(`/api/timesheets/${IDS.technician}/lines`, { id: crypto.randomUUID(), date: '2026-11-05', typed: typed('1', 'L-FIRST'), expectedRevision: null });
     const first = await submitForms<{ submission: { id: string; timesheetPeriodId: string } }>(tech, IDS.technician, '2026-11-01', '2026-11-25');
     expect(first.status).toBe(200);
-    const before = await counts();
+    const [kept] = await db.select().from(schema.timesheetPeriods).where(eq(schema.timesheetPeriods.id, first.data.submission.timesheetPeriodId));
+    const ids: string[] = [first.data.submission.id];
     for (const [from, to] of [['2026-11-20', '2026-12-15'], ['2026-11-01', '2026-11-25'], ['2026-10-01', '2026-12-31']]) {
-      const again = await submitForms(tech, IDS.technician, from!, to!, { confirmReplace: true });
-      expect(again.error?.violations[0]?.code, `${from} – ${to}`).toBe('payroll_period_submitted');
+      // A new line on a date already submitted — accepted, and carried by the next submission only.
+      const saved = await tech.post(`/api/timesheets/${IDS.technician}/lines`, { id: crypto.randomUUID(), date: '2026-11-22', typed: typed('1', `L-${from}`), expectedRevision: null });
+      expect(saved.status, JSON.stringify(saved.error)).toBe(200);
+      const again = await submitForms<{ submission: { id: string; timesheetPeriodId: string } }>(tech, IDS.technician, from!, to!);
+      expect(again.status, `${from} – ${to} ${JSON.stringify(again.error)}`).toBe(200);
+      ids.push(again.data.submission.id);
+      const [period] = await db.select().from(schema.timesheetPeriods).where(eq(schema.timesheetPeriods.id, again.data.submission.timesheetPeriodId));
+      expect((period?.snapshot as { entries: { customerName: string }[] }).entries.map((entry) => entry.customerName)).toEqual([`L-${from}`]);
     }
-    expect(await counts()).toEqual(before);
-    expect((await db.select().from(schema.payrollFormCompletions)).filter((form) => form.submissionId === null)).toHaveLength(0);
+    expect(await counts()).toEqual({ payroll: 4, periods: 4, current: 4 });
+    expect(new Set(ids).size).toBe(4);
+    // The first, exactly as it was sent; every line in exactly one submission (the ledger).
+    const [still] = await db.select().from(schema.timesheetPeriods).where(eq(schema.timesheetPeriods.id, first.data.submission.timesheetPeriodId));
+    expect(still).toEqual(kept);
+    const ledger = await db.select().from(schema.timesheetSubmittedLines);
+    expect(ledger).toHaveLength(4);
+    expect(new Set(ledger.map((row) => row.periodId)).size).toBe(4);
   });
 
-  it('the database refuses: a rewritten, deleted or revived submission, two current ones sharing a day, a wrong Finance month, an unsafe name', async () => {
+  it('0056: the line ledger — filled as a timesheet is sent; a line already submitted refuses the whole submission; append-only', async () => {
+    const tech = await signIn('sipho@example-test.co.za');
+    const lineId = crypto.randomUUID();
+    await tech.post(`/api/timesheets/${IDS.technician}/lines`, { id: lineId, date: '2026-11-05', typed: typed('1'), expectedRevision: null });
+    const sent = await submitForms<{ submission: { timesheetPeriodId: string } }>(tech, IDS.technician, '2026-11-01', '2026-11-25');
+    expect(sent.status, JSON.stringify(sent.error)).toBe(200);
+    const [row] = await db.select().from(schema.timesheetSubmittedLines);
+    expect(row).toMatchObject({ entryId: lineId, userId: IDS.technician, workDate: '2026-11-05', periodId: sent.data.submission.timesheetPeriodId });
+    // The same line in another sent period: refused by the database, whatever its dates.
+    const [period] = await db.select().from(schema.timesheetPeriods).where(eq(schema.timesheetPeriods.id, sent.data.submission.timesheetPeriodId));
+    const before = (await db.select().from(schema.timesheetPeriods)).length;
+    expect(await postgresMessage(
+      db.insert(schema.timesheetPeriods).values({
+        id: crypto.randomUUID(), userId: IDS.technician, periodFrom: '2026-11-05', periodTo: '2026-11-05', comment: '', updatedBy: IDS.technician,
+        commentedAt: new Date().toISOString(), submittedAt: new Date().toISOString(), submittedBy: IDS.technician, snapshot: period!.snapshot,
+      }),
+    )).toContain('is already in a submitted timesheet');
+    expect((await db.select().from(schema.timesheetPeriods)).length).toBe(before);
+    // Append-only.
+    expect(await postgresMessage(db.execute(sql`update timesheet_submitted_lines set work_date = '2026-11-06' where entry_id = ${lineId}`))).toContain('never changed or deleted');
+    expect(await postgresMessage(db.execute(sql`delete from timesheet_submitted_lines where entry_id = ${lineId}`))).toContain('never changed or deleted');
+    // A submitted line is never changed through the API either; a new line on its date is accepted.
+    const changed = await tech.post(`/api/timesheets/${IDS.technician}/lines`, { id: lineId, date: '2026-11-05', typed: typed('9'), expectedRevision: null });
+    expect(changed.error?.violations[0]?.code).toBe('timesheet_line_submitted');
+  });
+
+  it('two submissions racing for the same open line: exactly one carries it; the other is refused or carries none — never both', async () => {
+    const tech = await signIn('sipho@example-test.co.za');
+    await tech.post(`/api/timesheets/${IDS.technician}/lines`, { id: crypto.randomUUID(), date: '2026-11-05', typed: typed('1', 'L-RACE'), expectedRevision: null });
+    const [a, b] = await Promise.all([
+      submitForms(tech, IDS.technician, '2026-11-01', '2026-11-25'),
+      submitForms(tech, IDS.technician, '2026-11-01', '2026-11-30'),
+    ]);
+    expect([a.status, b.status]).toContain(200);
+    const periods = await db.select().from(schema.timesheetPeriods);
+    const carrying = periods.filter((period) => (period.snapshot as { entries: { customerName: string }[] }).entries.some((entry) => entry.customerName === 'L-RACE'));
+    expect(carrying).toHaveLength(1);
+    expect(await db.select().from(schema.timesheetSubmittedLines)).toHaveLength(1);
+  });
+
+  it('the database refuses: a rewritten, deleted or revived submission, a wrong Finance month, an unsafe name — and allows two sharing a day (0056)', async () => {
     const tech = await signIn('sipho@example-test.co.za');
     const sent = await submitForms<{ submission: { id: string } }>(tech, IDS.technician, '2026-11-01', '2026-11-25');
     expect(sent.status, JSON.stringify(sent.error)).toBe(200);
@@ -128,7 +181,9 @@ describeDb('payroll forms on PostgreSQL (migration 0052)', () => {
         timesheetPeriodId: null, attendanceSnapshot: {}, timesheetFileName: '', attendanceFileName: 'Attendance.pdf', documents: [],
         submittedAt: new Date().toISOString(), submittedBy: IDS.technician,
       });
-    expect(await postgresMessage(insert('2026-11-20', '2026-12-10', '2026-12'))).toContain('overlaps one already made');
+    // REPEAT-DATES-1 (0056): a submission sharing days with another is allowed.
+    await insert('2026-11-20', '2026-12-10', '2026-12');
+    expect((await db.select().from(schema.payrollSubmissions)).length).toBe(2);
     expect(await postgresMessage(insert('2026-12-01', '2026-12-10', '2026-11'))).toContain('payroll_submissions_finance_month_of_to');
     expect(await postgresMessage(insert('2026-12-10', '2026-12-01', '2026-12'))).toContain('payroll_submissions_range_ordered');
     expect(await postgresMessage(insert('2025-01-01', '2026-10-01', '2026-10'))).toContain('payroll_submissions_range_bounded');

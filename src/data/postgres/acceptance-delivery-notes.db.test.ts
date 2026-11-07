@@ -104,17 +104,15 @@ describeDb('migration 0048 — Delivery Notes, overlapping timesheets, Senior Te
     snapshot: { technicianName: 'Sipho Mahlangu', from, to, comment: '', entries: [] },
   });
 
-  it('TS-OVERLAP-1 / TS-PAPER-7: a submission covering the earlier one supersedes it (a partial one never does); one current per day; nothing deleted', async () => {
+  it('REPEAT-DATES-1 (0056): sent periods may share days and dates; a replaced one stays replaced; nothing deleted', async () => {
     const attendance = new PostgresAttendanceRepository(db);
     const first = (await attendance.submitPeriod(period('2026-10-01', '2026-10-31')))!;
-    // Without superseding first, the guard refuses a second current submission for the same days.
-    expect(await refusal(attendance.submitPeriod(period('2026-10-15', '2026-11-14')))).toMatch(/overlaps a period already sent/u);
-    // TS-PAPER-7: dates covering only part of it replace nothing — the partial submission stays refused.
-    expect(await attendance.supersedeOverlappingPeriods({ userId: TECH, from: '2026-10-15', to: '2026-11-14', exceptId: null, at: NOW, by: TECH })).toEqual([]);
-    expect(await refusal(attendance.submitPeriod(period('2026-10-15', '2026-11-14')))).toMatch(/overlaps a period already sent/u);
-    // Dates covering ALL of it replace it.
+    // 0056: a second CURRENT submission sharing days is allowed — each carries its own lines.
+    const sharing = (await attendance.submitPeriod(period('2026-10-15', '2026-11-14')))!;
+    expect((await attendance.listSubmittedPeriods(TECH, '2026-09-01', '2026-12-31')).map((row) => row.id).sort()).toEqual([first.id, sharing.id].sort());
+    // A v1.6.0 replacement already stored is read as it was: superseding still works on what it covers.
     const replaced = await attendance.supersedeOverlappingPeriods({ userId: TECH, from: '2026-09-26', to: '2026-11-14', exceptId: null, at: NOW, by: TECH });
-    expect(replaced.map((row) => row.id)).toEqual([first.id]);
+    expect(replaced.map((row) => row.id).sort()).toEqual([first.id, sharing.id].sort());
     const second = (await attendance.submitPeriod(period('2026-09-26', '2026-11-14')))!;
     expect((await attendance.listSubmittedPeriods(TECH, '2026-09-01', '2026-12-31')).map((row) => row.id)).toEqual([second.id]);
     // Kept, not deleted; and current again only by being SENT again.
@@ -122,12 +120,10 @@ describeDb('migration 0048 — Delivery Notes, overlapping timesheets, Senior Te
     // PAYROLL-ONE-1 (0052): a replaced submission stays replaced — it is never made current again in place.
     expect(await refusal(db.execute(sql`update timesheet_periods set superseded_at = null where id = ${first.id}`))).toMatch(/stays replaced/u);
     expect(await refusal(db.execute(sql`delete from timesheet_periods where id = ${first.id}`))).toMatch(/cannot be deleted/u);
-    // And a complete replacement with the very same dates keeps the original beside it (one CURRENT row per dates).
-    expect((await attendance.supersedeOverlappingPeriods({ userId: TECH, from: '2026-09-26', to: '2026-11-14', exceptId: null, at: NOW, by: TECH })).map((row) => row.id)).toEqual([second.id]);
+    // 0056: the very same dates sent again are a NEW row beside the current one — both current.
     const third = (await attendance.submitPeriod({ ...period('2026-09-26', '2026-11-14'), id: crypto.randomUUID() }))!;
     expect(third.id).not.toBe(second.id);
-    expect((await attendance.findPeriod(TECH, '2026-09-26', '2026-11-14'))?.id).toBe(third.id);
-    expect((await attendance.listSubmittedPeriods(TECH, '2026-09-01', '2026-12-31')).map((row) => row.id)).toEqual([third.id]);
+    expect((await attendance.listSubmittedPeriods(TECH, '2026-09-01', '2026-12-31')).map((row) => row.id).sort()).toEqual([second.id, third.id].sort());
   });
 
   it('STANDBY-ELIG-2: a Senior Tech stands in a main place, never an apprentice place', async () => {

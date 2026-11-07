@@ -9,10 +9,15 @@ import { WorkflowError } from './errors';
  *
  * Once a person COMPLETES their timesheet or attendance for From–To, those
  * dates are final for that form: nothing in them is added, changed, cleared or
- * removed — by the page, another tab or device, or a request made by hand. The
- * same holds once the forms are SUBMITTED TO THE OFFICE (they are permanently
- * read-only); the only way to change a submitted timesheet stays a correction
- * (TS-16). Every write path of both forms asks here, on the server.
+ * removed — by the page, another tab or device, or a request made by hand.
+ * Submitted ATTENDANCE keeps its dates locked (a day has one attendance).
+ *
+ * A SUBMITTED TIMESHEET DOES NOT LOCK ITS DATES (REPEAT-DATES-1, the owner,
+ * 7 November 2026): the same calendar date may be in any number of submitted
+ * timesheets. What is paid once is the LINE: a submitted line is never changed,
+ * moved or removed (refused by the line, `submissionHolding`), and never in a
+ * second submission (`openEntries`, and the database's line ledger). Every write
+ * path of both forms asks here, on the server.
  *
  * Kept small and free of the other payroll modules, so the timesheet and
  * attendance operations can call it without an import cycle.
@@ -27,24 +32,22 @@ const refuse = (message: string, code: string, detail: string): WorkflowError =>
   new WorkflowError(message, [{ code, message: detail }]);
 
 /**
- * Every range the person's `kind` form is locked for: the completed form awaiting submission, and what was submitted.
- * Only the PERSON's own forms, current ones: a replaced submission, somebody else's, a withdrawn form (FORM-WITHDRAW-1)
- * or a date merely in the past never locks anything.
+ * Every range the person's `kind` form is locked for: the completed form awaiting submission, and — attendance
+ * only — what was submitted. Only the PERSON's own forms, current ones: a replaced submission, somebody else's, a
+ * withdrawn form (FORM-WITHDRAW-1), a correction draft, a submitted TIMESHEET (REPEAT-DATES-1) or a date merely in
+ * the past never locks anything.
  */
 export const lockedRanges = async (context: OperationContext, userId: UserId, kind: PayrollDocumentKind): Promise<readonly LockedRange[]> => {
-  const [completions, payroll, monthly, periods] = await Promise.all([
+  const [completions, payroll, monthly] = await Promise.all([
     context.repos.payroll.listFormCompletions(userId),
-    context.repos.payroll.listPayrollSubmissionsFor(userId),
+    kind === 'attendance' ? context.repos.payroll.listPayrollSubmissionsFor(userId) : Promise.resolve([]),
     kind === 'attendance' ? context.repos.payroll.listSubmissionsFor(userId) : Promise.resolve([]),
-    kind === 'timesheet' ? context.repos.attendance.listSubmissions(userId) : Promise.resolve([]),
   ]);
+  // REPEAT-DATES-1: a submitted timesheet locks no date — its lines are held by their identity instead.
   return [
     ...completions.filter((form) => form.kind === kind && formAwaits(form)).map((form) => ({ from: form.from, to: form.to, why: 'completed' as const })),
     ...payroll.filter((submission) => (submission.supersededAt ?? null) === null).map((submission) => ({ from: submission.from, to: submission.to, why: 'submitted' as const })),
     ...monthly.filter((submission) => (submission.supersededAt ?? null) === null).map((submission) => ({ ...monthBounds(submission.month), why: 'submitted' as const })),
-    ...periods
-      .filter((period) => period.submittedAt !== null && (period.supersededAt ?? null) === null)
-      .map((period) => ({ from: period.from, to: period.to, why: 'submitted' as const })),
   ];
 };
 
@@ -64,15 +67,12 @@ export const holdFormLock = async (context: OperationContext, userId: UserId, ki
 
 /**
  * Refuses when any of these dates is locked for the person's `kind` form.
- * `form_completed` while the form awaits submission; `form_submitted` once it
- * went to the office. Null dates (a draft with none yet) are open.
+ * `form_completed` while the form awaits submission; `form_submitted` once
+ * attendance went to the office. Null dates (a draft with none yet) are open.
  *
  * `leaving` (v1.7.1): the dates a WORKING line is taken away from — removed,
- * or moved to another date. A submitted form does not hold them: the caller
- * has already refused a line that is IN a submitted timesheet, so a line only
- * left over on a sent date (typed there before v1.7.0 retired resubmission)
- * can be removed or moved off, never changed in place. A completed form still
- * holds its dates — its lines are in it.
+ * or moved to another date. A submitted form does not hold them; a completed
+ * form still does — its lines are in it.
  */
 export const assertDatesOpen = async (
   context: OperationContext,

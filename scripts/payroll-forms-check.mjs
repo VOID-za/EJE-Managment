@@ -269,10 +269,12 @@ await check('24–27. Submit to Office: both forms together, once; frozen with t
   if (!(await page.getByTestId('my-forms-submit').isEnabled())) fail('Submit to Office is not offered with both forms completed');
   await press(page.getByTestId('my-forms-submit'));
   await page.getByTestId('my-forms-done').waitFor({ timeout: 20000 });
-  const row = page.locator('[data-testid="my-monthly-history-row"]').first();
-  await row.waitFor({ timeout: 20000 });
-  if ((await row.getAttribute('data-from')) !== FROM || (await row.getAttribute('data-to')) !== TO) fail('the history does not show the period');
+  // HISTORY-ONE-1: one row per submitted form, newest first — the submission's timesheet and attendance.
+  const first = page.locator('[data-testid="my-monthly-history-form"]').first();
+  await first.waitFor({ timeout: 20000 });
+  if ((await first.getAttribute('data-from')) !== FROM || (await first.getAttribute('data-to')) !== TO) fail('the history does not show the period');
   for (const [kind, name] of [['timesheet', 'Sipho Timesheet Payroll Check.pdf'], ['attendance', 'Sipho Attendance Payroll Check.pdf']]) {
+    const row = page.locator(`[data-testid="my-monthly-history-form"][data-kind="${kind}"][data-from="${FROM}"][data-to="${TO}"]`);
     if ((await row.getByTestId(`history-${kind}-file`).textContent()) !== name) fail(`the submitted ${kind} is not named ${name}`);
   }
   const me = (await call('GET', '/api/auth/me')).json?.data?.user?.id;
@@ -305,23 +307,24 @@ await check('27–28. submitted lines leave Timesheets and cannot be changed the
   if (removed.status !== 422) fail(`removing a submitted line answered ${removed.status}`);
   await go(`/attendance?from=${FROM}&to=${TO}`);
   await page.getByTestId('my-attendance-from').waitFor({ timeout: 20000 });
-  for (const gone of ['my-monthly-history', 'my-monthly-history-row', 'timesheet-submissions', 'my-submitted-timesheets']) {
+  for (const gone of ['my-monthly-history', 'my-monthly-history-form', 'timesheet-submissions', 'my-submitted-timesheets']) {
     if ((await page.getByTestId(gone).count()) > 0) fail(`Attendance shows ${gone}`);
   }
   await go('/payroll/mine');
-  await page.locator(`[data-testid="my-submitted-timesheets"] [data-testid="timesheet-submission"][data-from="${FROM}"][data-to="${TO}"]`).waitFor({ timeout: 20000 });
-  const row = page.locator('[data-testid="my-monthly-history-row"]').first();
+  const row = page.locator(`[data-testid="my-monthly-history-form"][data-kind="timesheet"][data-from="${FROM}"][data-to="${TO}"]`);
+  await row.waitFor({ timeout: 20000 });
+  if ((await page.getByTestId('my-submitted-timesheets').count()) !== 0) fail('a separate submitted-timesheets section is still shown');
   const [download] = await Promise.all([page.waitForEvent('download', { timeout: 20000 }), press(row.getByTestId('history-timesheet-download'))]);
   if (download.suggestedFilename() !== 'Sipho Timesheet Payroll Check.pdf') fail(`the submitted PDF downloaded as ${download.suggestedFilename()}`);
 });
 
-await check('30. the same dates again are refused — completed or submitted, a form is never submitted twice', async () => {
-  for (const kind of ['timesheet', 'attendance']) {
-    const again = await call('POST', `/api/payroll/forms/${sipho}/complete`, { kind, from: FROM, to: TO, fileName: '', confirmUnrecorded: true, confirmNoLines: true });
-    if (again.json?.error?.violations?.[0]?.code !== 'payroll_period_submitted') fail(`the ${kind} again answered ${again.status}`);
-  }
+await check('30. a submitted form is never submitted twice; its dates may be used again, in a new submission of its own (REPEAT-DATES-1)', async () => {
   const submit = await call('POST', `/api/payroll/forms/${sipho}/submit`, {});
-  if (submit.status !== 422) fail(`Submit to Office again answered ${submit.status}`);
+  if (submit.json?.error?.violations?.[0]?.code !== 'payroll_already_submitted') fail(`Submit to Office again answered ${submit.status}`);
+  // The same dates are open to a new timesheet: the server's check names the earlier submission, and refuses nothing for it.
+  const forms = (await call('GET', `/api/payroll/forms/${sipho}?from=${FROM}&to=${TO}`)).json?.data;
+  if ((forms?.repeats ?? []).length !== 1) fail('the earlier submission sharing these dates is not named');
+  if ((forms?.problems ?? []).some((problem) => /already submitted/u.test(problem))) fail('the dates are refused because they were submitted');
 });
 
 await check('29. the office reads the period and its documents; another technician does not', async () => {

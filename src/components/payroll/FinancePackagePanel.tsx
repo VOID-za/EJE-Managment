@@ -18,6 +18,8 @@ export const PAYROLL_STATUS: Record<PayrollMonthRow['status'], { label: string; 
   correction_pending: { label: 'Correction waiting', tone: 'red' },
   sent: { label: 'Sent to Finance', tone: 'outline' },
   corrected_after_sent: { label: 'Corrected after sending', tone: 'blue' },
+  // REPEAT-DATES-1: a further submission after the month went — it alone goes, in addition.
+  added_after_sent: { label: 'Further submission since sending', tone: 'blue' },
 };
 
 const PACKAGE_STATUS: Record<FinancePackageView['status'], string> = {
@@ -183,6 +185,33 @@ export const FinancePackagePanel = ({ month, onOpenForms }: { readonly month: st
                           />
                         ))}
                       </span>
+                    </span>
+                  ))}
+                  {/* REPEAT-DATES-1: for review, never a refusal — a repeated date is not by itself a duplicate. */}
+                  {row.repeatedDates.map((repeat) => (
+                    <span
+                      key={`${repeat.submission.id}:${repeat.earlier.id}`}
+                      className="mt-1 block rounded-[var(--radius-control)] border border-amber-eje-200 bg-amber-eje-50 px-2 py-1 text-amber-eje-800"
+                      data-testid="payroll-repeated-dates"
+                      data-submission={repeat.submission.id}
+                      data-earlier={repeat.earlier.id}
+                    >
+                      <span className="font-medium">Review — repeated dates {repeat.label}:</span> {repeat.submission.label} (submitted {formatDateTime(repeat.submission.submittedAt)}) shares these days with {repeat.earlier.label}
+                      {repeat.earlier.submittedAt === null ? '' : ` (submitted ${formatDateTime(repeat.earlier.submittedAt)})`}
+                      {repeat.earlier.sentToFinanceAt === null ? ', not sent to Finance' : `, sent to Finance ${formatDateTime(repeat.earlier.sentToFinanceAt)}`}. Allowed — each carries its own lines, and no line is in both; check the work is not entered twice.
+                      {repeat.earlier.kind === 'payroll' && (
+                        <span className="mt-0.5 flex flex-wrap gap-1">
+                          {(repeat.earlier.timesheetRequired ? (['timesheet', 'attendance'] as const) : (['attendance'] as const)).map((kind) => (
+                            <DownloadFileButton
+                              key={kind}
+                              href={payroll.submittedPdfUrl(repeat.earlier.id, kind)}
+                              fallbackName={`${kind === 'timesheet' ? 'Timesheet' : 'Attendance'} ${repeat.earlier.label}.pdf`}
+                              label={`Earlier ${kind}`}
+                              testId={`payroll-repeated-earlier-${kind}`}
+                            />
+                          ))}
+                        </span>
+                      )}
                     </span>
                   ))}
                 </td>
