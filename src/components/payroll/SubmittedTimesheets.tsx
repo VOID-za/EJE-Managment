@@ -90,7 +90,7 @@ export const OfficeSubmittedTimesheets = () => {
         <Badge tone="outline" size="sm">Office</Badge>
       </div>
       <p className="mb-3 text-xs text-steel-500">
-        Each person submits their own on My Monthly Forms. Open one to read it exactly as submitted, download its PDF or export its lines; decide the corrections asked for. The same date may be in more than one submission — each carries its own lines.
+        Each person submits their own on My Monthly Forms. Open one to read it exactly as submitted or download its PDF; decide the corrections asked for. The same date may be in more than one submission — each carries its own lines.
       </p>
       <TimesheetSubmissions
         user={user}
@@ -102,6 +102,8 @@ export const OfficeSubmittedTimesheets = () => {
         showTechnician
         customers={customers.data ?? []}
         onChanged={() => everybody.refetch()}
+        // CSV-OFF-2 (the owner's tester, 2 November 2026): no Export CSV on Monthly Forms.
+        exportCsv={false}
       />
     </Card>
   );

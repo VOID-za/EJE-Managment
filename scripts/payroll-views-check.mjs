@@ -26,7 +26,6 @@
  *   EJE_FORMS_VIEWPORT=768x1024:touch npm run payroll-views-check
  *   EJE_FORMS_VIEWPORT=390x844:touch npm run payroll-views-check
  */
-import { readFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 import { resetDemonstration, signInAs, signOut } from './sign-in.mjs';
 import { assertLocalTarget } from './local-target.mjs';
@@ -345,9 +344,8 @@ await check('Corrections: asked for by the technician, accepted by the office â€
   await press(page.getByTestId('timesheet-correction-accept'));
   await page.waitForFunction(() => document.querySelector('[data-testid="timesheet-correction"]')?.getAttribute('data-status') === 'accepted', null, { timeout: 20000 });
   if (!/Correction 1/u.test(await page.getByTestId('timesheet-version-in-force').innerText())) fail('the version in force is not Correction 1');
-  const csv = await download(theirs.getByTestId('timesheet-submission-csv'));
-  const text = await readFile(await csv.path(), 'utf8');
-  for (const column of ['OT', 'D/T', 'Callout', 'Int Km', 'Cust Km']) if (!text.split('\n')[0].includes(column)) fail(`the CSV has no ${column} column`);
+  // CSV-OFF-2: no Export CSV on Monthly Forms â€” the list moved here keeps none.
+  if ((await theirs.getByTestId('timesheet-submission-csv').count()) !== 0) fail('Export CSV is on EJE Monthly Forms');
   await press(theirs.getByTestId('timesheet-submission-view-original'));
   await page.getByTestId('document-preview').waitFor({ timeout: 20000 });
   await page.keyboard.press('Escape');

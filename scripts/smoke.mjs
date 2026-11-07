@@ -4303,7 +4303,8 @@ await step('the same dates cannot be submitted again unconfirmed; the office ope
   const office = page.getByTestId('timesheet-office');
   const row = office.locator(`[data-testid="timesheet-submission"][data-from="${from}"][data-to="${to}"]`).filter({ hasText: 'Sipho' }).first();
   await row.waitFor({ timeout: 15000 });
-  await row.getByTestId('timesheet-submission-csv').waitFor({ timeout: 5000 });
+  // CSV-OFF-2: no Export CSV on Monthly Forms, the moved list included.
+  if ((await row.getByTestId('timesheet-submission-csv').count()) !== 0) throw new Error('Export CSV is on EJE Monthly Forms');
   await row.getByTestId('timesheet-submission-view-original').click();
   await page.getByTestId('document-preview').waitFor({ timeout: 20000 });
   await page.getByTestId('preview-close').click();
@@ -4629,11 +4630,7 @@ await step('My Monthly Forms previews, prints, downloads, exports and submits th
     if ((await officeCard.getByTestId('monthly-forms-edit').count()) !== 0) throw new Error(`${who} was offered editing a technician’s forms`);
     // CSV-OFF-2 (2 November 2026): no Export CSV on Monthly Forms.
     if ((await page.getByTestId('attendance-export').count()) !== 0) throw new Error(`${who} still sees the attendance CSV export`);
-    // CSV-OFF-2 is about the month (the package and a person's forms). The submitted-timesheets list below them
-    // (FORMS-OWN-1 moved it here from My Monthly Forms) keeps each submission's lines export, as it had there.
-    for (const area of ['finance-package', 'monthly-forms']) {
-      if ((await page.getByTestId(area).getByRole('button', { name: 'Export CSV' }).count()) !== 0) throw new Error(`${who} still sees Export CSV on Monthly Forms`);
-    }
+    if ((await page.getByRole('button', { name: 'Export CSV' }).count()) !== 0) throw new Error(`${who} still sees Export CSV on Monthly Forms`);
   }
 
   // Another technician sees only their own month, and is refused Naledi's.

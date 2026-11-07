@@ -34,6 +34,7 @@ export const TimesheetSubmissions = ({
   showTechnician,
   customers,
   onChanged,
+  exportCsv = true,
 }: {
   readonly user: User;
   readonly submissions: readonly TimesheetSubmissionView[] | null;
@@ -45,6 +46,8 @@ export const TimesheetSubmissions = ({
   readonly showTechnician: boolean;
   readonly customers: readonly { readonly id: string; readonly name: string }[];
   readonly onChanged: () => void;
+  /** The office's Export CSV of a submission's lines. Off on EJE Monthly Forms (CSV-OFF-2: no Export CSV there). */
+  readonly exportCsv?: boolean;
 }) => {
   // Which submission is open, and which version of it: the version in force, or the original snapshot.
   const [viewing, setViewing] = useState<{ readonly submission: TimesheetSubmissionView; readonly version: 'current' | 'original' } | null>(null);
@@ -126,7 +129,7 @@ export const TimesheetSubmissions = ({
                   label="PDF"
                   testId="timesheet-submission-pdf"
                 />
-                {office && (
+                {office && exportCsv && (
                   <DownloadFileButton
                     href={timesheets.submissionExportUrl(submission.id)}
                     fallbackName={`eje-timesheet-${submission.from}-to-${submission.to}.csv`}
