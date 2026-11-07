@@ -101,8 +101,8 @@ export const TimesheetCorrections = ({
   const openPreview = (version: string, title: string) => {
     setPreviewDocument(null);
     setPreviewing({ version, title });
-    void timesheets
-      .document(personId, period.from, period.to, version)
+    // REPEAT-DATES-1: the very submission, by its id — several may share these dates.
+    void (period.id === null ? timesheets.document(personId, period.from, period.to, version) : timesheets.submission(period.id, version))
       .then(setPreviewDocument)
       .catch(() => setPreviewDocument(null));
   };
@@ -363,7 +363,11 @@ export const TimesheetCorrections = ({
         open={previewing !== null}
         title={`Time Sheet — ${previewing?.title ?? ''}`}
         description="A version of the timesheet that was sent. Looking at it changes nothing."
-        loadPdf={() => timesheets.pdf(personId, period.from, period.to, previewing?.version ?? 'current')}
+        loadPdf={() =>
+          period.id === null
+            ? timesheets.pdf(personId, period.from, period.to, previewing?.version ?? 'current')
+            : timesheets.submissionPdf(period.id, `time-sheet-${period.from}-to-${period.to}.pdf`, previewing?.version ?? 'current')
+        }
         renderHtml={() => (previewDocument === null ? null : <TimesheetDocumentView document={previewDocument} />)}
         onClose={() => setPreviewing(null)}
       />

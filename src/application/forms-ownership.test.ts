@@ -106,6 +106,10 @@ describe('the Office keeps attendance only — refused on the server, not only h
     expect(submission.documents.map((document) => document.kind)).toEqual(['attendance']);
     await refusedWith(loadSubmittedPayrollDocument(harness.as(coordinator), submission.id, 'timesheet'), 'document_not_found');
     expect((await listPayrollHistory(harness.as(coordinator), coordinator.id)).flatMap((entry) => entry.documents.map((document) => document.kind))).toEqual(['attendance']);
+    // Attendance alone has no work lines: the same days submitted again would only reach Finance twice — refused.
+    await refusedWith(complete(coordinator, 'attendance'), 'attendance_already_submitted');
+    await refusedWith(complete(coordinator, 'attendance', '2026-11-20', '2026-11-30'), 'attendance_already_submitted');
+    await expect(complete(coordinator, 'attendance', '2026-11-26', '2026-11-30')).resolves.toMatchObject({ kind: 'attendance' });
   });
 });
 

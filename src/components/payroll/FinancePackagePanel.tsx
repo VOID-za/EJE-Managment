@@ -206,7 +206,7 @@ export const FinancePackagePanel = ({ month, onOpenForms }: { readonly month: st
                               key={kind}
                               href={payroll.submittedPdfUrl(repeat.earlier.id, kind)}
                               fallbackName={`${kind === 'timesheet' ? 'Timesheet' : 'Attendance'} ${repeat.earlier.label}.pdf`}
-                              label={`Earlier ${kind}`}
+                              label={`Other submission’s ${kind}`}
                               testId={`payroll-repeated-earlier-${kind}`}
                             />
                           ))}

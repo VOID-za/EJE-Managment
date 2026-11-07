@@ -298,7 +298,9 @@ export class PostgresAttendanceRepository implements AttendanceRepository {
         ),
       )
       // PAYROLL-ONE-1 (0052): a replaced period may share its dates with its replacement; the current one is meant.
-      .orderBy(sql`${schema.timesheetPeriods.supersededAt} is not null`)
+      // REPEAT-DATES-1: several sent rows may share the dates — deterministic: current first, then the latest sent. A caller
+      // that means one submission asks by its id (findPeriodById).
+      .orderBy(sql`${schema.timesheetPeriods.supersededAt} is not null`, desc(schema.timesheetPeriods.submittedAt), desc(schema.timesheetPeriods.id))
       .limit(1);
     return rows[0] === undefined ? null : toDomainPeriod(rows[0]);
   }

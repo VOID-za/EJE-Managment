@@ -10,7 +10,8 @@ Forms (TS-DAY-1, the owner, 6 November 2026) as **v1.6.0** (`42e6bd4`, no migrat
 completed on its own page, both submitted to the office together; Present and
 Absent toggle; the six-column timesheet rows) as **v1.7.0** (`38b75cd`, migration 0054), deployed 6 November 2026 — not yet approved; and
 **Withdraw and Correct** with the Timesheets corrections (FORM-WITHDRAW-1, TS-DAY-2, FORM-LOCK-2, TEST-ISOLATION-1,
-the owner, 6 November 2026) as **v1.7.1** (`55e1d06`, migration 0055), deployed 7 November 2026 — not yet approved. Release records:
+the owner, 6 November 2026) as **v1.7.1** (`55e1d06`, migration 0055), deployed 7 November 2026 — **accepted by the owner on 7 November 2026** (the stable baseline); and
+**repeated dates with line identity, personal My Monthly Forms and one History** (REPEAT-DATES-1, FORMS-OWN-1, HISTORY-ONE-1, the owner, 7 November 2026) as **v1.8.0** (migration 0056) — not yet approved. Release records:
 `docs/deploy-next-release.md`. The device checks that only a person can do:
 `docs/timesheets-physical-test-sheet.md`. This replaces the "Submit timesheet" of TS-PAPER
 (`docs/timesheets-paper.md`) and the calendar-month "Submit" of PAY-02. The
@@ -130,13 +131,86 @@ it is submitted to the office; once submitted, never.**
   corrections of submitted timesheets stay under Submitted timesheets. History
   stays read only: Preview and Download, nothing else.
 
-## Which dates are locked (FORM-LOCK-2, v1.7.1)
+## Repeated dates and duplicate-payment safeguards (REPEAT-DATES-1, v1.8.0)
 
-A day is locked only by the person's OWN CURRENT forms, from the server
-(`lockedRanges`): their completed form awaiting submission (`form_completed`),
-or a form they submitted to the office (`form_submitted`). Never by a date
-being in the past, by another person's form, by a replaced submission, by a
-withdrawn form, or by demonstration data of another account.
+The owner's rule (7 November 2026): **the same calendar date may legitimately
+appear in more than one submitted timesheet.** A date is never refused,
+locked or replaced because an earlier submission had it, and the next
+period's start (the day after the last submission) is only a *suggestion*.
+
+**What was there before.** Until v1.7.1 the calendar date *was* the payroll
+identity: the database allowed one current submission per person for any day
+(`guard_timesheet_period`, `guard_payroll_submission` and the two
+current-range unique keys), and a submitted timesheet locked its dates.
+
+**What identifies paid work now — the work line.** Each timesheet line has its
+own id (`timesheet_entries.id`). A line belongs to the timesheet that carried
+it, for good:
+
+| Record | Identity | What it says |
+|---|---|---|
+| `timesheet_entries` | line id | the work: person, work date, customer/site, OT, D/T, call-out, km |
+| `timesheet_periods` (sent) | period id | one submitted timesheet: its From–To and the snapshot of exactly the lines it carried |
+| `timesheet_submitted_lines` (0056) | **line id (primary key)** | the one sent timesheet that carried each line, its work date, when |
+| `payroll_submissions` | submission id | the Submit to Office: timesheet period + frozen attendance + stored PDFs; Finance month = month of To |
+| `timesheet_corrections` | correction id | TS-16 corrections of one sent timesheet, the original kept |
+| `finance_packages` (manifest `basis`) | package id; per person the submissions and timesheet versions it carried | what was sent to Finance, once |
+
+- **A new timesheet carries only OPEN lines** (`openEntries`): lines no
+  submitted timesheet holds — its original snapshot, or a correction accepted
+  or still pending on it. Completing, the completed PDF, Submit to Office's
+  "still exactly as completed" check and the submitted snapshot all read the
+  same open lines. A line already submitted is never in a second timesheet,
+  whatever dates are chosen.
+- **The database enforces it**: when a timesheet period is sent, the trigger
+  `record_timesheet_submitted_lines` records each of its lines in
+  `timesheet_submitted_lines` and refuses the whole submission if any line is
+  already there (`timesheet line … is already in a submitted timesheet`). Two
+  submissions racing for one person take an advisory lock, so the second sees
+  the first's lines. The ledger is append-only.
+- **A submitted line is never changed, moved or removed** — refused by the
+  line (`timesheet_line_submitted`), on every write path. A NEW line on a
+  submitted date is accepted; it belongs to the timesheet being filled in.
+- **Each submission keeps its own identity**: a submission with the same or
+  overlapping dates is a new row beside the earlier one, which is never
+  replaced, rewritten or merged. Both stay current, readable and downloadable.
+- **Retries and races**: Submit to Office carries an idempotency key; a
+  completed form records its submission once (the 0054 guard); a retry with
+  nothing newly completed is refused (`payroll_already_submitted`).
+- **The same work typed twice by mistake** is not deleted or refused (it may be
+  legitimate): the Timesheets day says which lines were already submitted for
+  that date, and the office sees every repeated date as a review note.
+- **Not locked by a submission**: a submitted *timesheet's* dates. **Still
+  locked**: a completed form's dates while it awaits submission
+  (`form_completed`), and submitted *attendance* (`form_submitted` — a day has
+  one attendance; a new submission sharing the days carries them as recorded,
+  and the Finance package names those days for review). A person who keeps
+  **no timesheet** (the Office) is refused attendance for days already
+  submitted (`attendance_already_submitted`): with no work lines, a repeat
+  would only send the same attendance to Finance twice.
+- Another person's submissions, a replaced submission, a withdrawn form or a
+  correction draft never restrict anybody's dates.
+
+**Payroll states that actually exist.** *Working* (lines saved) → *Completed —
+awaiting submission* (locked; may be withdrawn) → *Submitted to the office*
+(payroll submission; read only) → *Sent to Finance* (in a sent Finance
+package). EJE records no "approved", "processed" or "paid" state: Finance pays
+outside the system, and a submitted or sent form is never shown as paid.
+
+**Office review** (EJE Monthly Forms): each of the month's submissions that
+shares days with another of the person's submissions (any month, any kind)
+carries a *Review — repeated dates* note naming both, the shared days, when
+each was submitted and whether the earlier one already went to Finance, with
+the earlier one's PDFs. Said once per pair (on the later); never a refusal.
+
+### Which dates are locked (FORM-LOCK-2, v1.7.1; REPEAT-DATES-1, v1.8.0)
+
+A day is locked only by the person's OWN current forms (`lockedRanges`): the
+completed form awaiting submission (`form_completed`), and — attendance only —
+attendance submitted to the office (`form_submitted`). Never by a date being
+in the past, by another person's form, by a replaced submission, by a
+withdrawn form, by a submitted timesheet (v1.8.0), or by demonstration data of
+another account.
 
 *The 31 October report (6 November 2026).* The day shown as "In a submitted
 timesheet" with **Submitted · View** belonged to the demonstration account
@@ -146,11 +220,11 @@ record of that account, not seed data, a fixture or an automated check. The
 chosen pay period (from 26 October) reached into it, so those days were —
 correctly — that submitted timesheet's, but the page only said "Submitted"
 and the lines typed there afterwards (allowed by v1.6.0's resubmission, which
-v1.7.0 retired) were stranded. Now: the day says which timesheet holds it and
-when it was sent; the page says the chosen dates reach into it and offers the
-day after it as the start; a line left over on a sent date (in no submitted
-timesheet) is shown read only and can be removed or moved off it — never
-changed there, and never sent for that date twice. The record is kept as it is.
+v1.7.0 retired) were stranded. v1.7.1 named the timesheet holding the day and
+offered the day after it as the start. v1.8.0 (REPEAT-DATES-1) goes further: the
+dates are open again; a line left over there is an ordinary open line (it is in
+no submitted timesheet), and the day lists the lines already submitted for it.
+The record is kept as it is.
 
 **Test data never reaches a shared deployment.** The browser suites that write
 (`scripts/*-check.mjs`, `forms-regression`, `integrations-regression`) refuse
@@ -281,24 +355,31 @@ first 92.
   rendered and stored under server-made keys
   (`payroll-submissions/<id>/<kind>.pdf`) with their SHA-256, one
   `payroll_submissions` row records it all, and both completed forms are
-  marked as part of it. The database refuses two current submissions of one
-  person sharing a day. The office is notified once, after it is saved.
+  marked as part of it. Submissions may share dates (REPEAT-DATES-1); the
+  database refuses a LINE in two of them. The office is notified once, after
+  it is saved.
 - If the answer is lost, the page says the forms may not have gone and reads
   them again: submitted, nothing awaits and the history shows them; not
   submitted, both still wait and Submit to Office is offered again — the same
   request, answered once.
-- **Submitted timesheets** (moved here from Timesheets on 6 November 2026):
-  the person's own — each opened exactly as submitted (original and the
-  corrected version in force), its PDF, and Corrections to ask for one — and,
-  for the office (`timesheets.viewAll`: Senior Tech and Office), every
-  technician's, with Export CSV and the corrections to accept or reject. The
-  Office now reaches it too (it has no Timesheets page). Notifications of a
-  submission or a correction link here.
+- **PERSONAL, FOR EVERY ROLE** (FORMS-OWN-1, v1.8.0): only the signed-in
+  person's own forms. The server takes the person from the session; completed
+  forms, correction drafts, withdrawn forms and the history of anybody else
+  are refused (`not_permitted` / `form_not_found`) — to a Senior Tech and the
+  Office too. Every technician's submitted timesheets (Export CSV, the
+  corrections to accept or reject) are on **EJE Monthly Forms** (`/payroll`),
+  for `timesheets.viewAll`; notifications of a submission link there.
+- **Corrections**: the forms withdrawn before submission (FORM-WITHDRAW-1) and,
+  for a role that keeps a timesheet, *A submitted timesheet* — choose one and
+  ask the office for a correction with the reason (TS-16); the original stays
+  in the History exactly as it went.
 - Nothing submitted is on the Timesheets or Attendance page.
-- The **History** (at the bottom) lists every submission — current, replaced
-  before this release, and the calendar months submitted before PAYROLL-ONE-1
-  — with the stored PDFs, under their submitted names, exactly as they went.
-  Read only: Preview and Download; no edit, delete, reopen or resubmit.
+- **ONE HISTORY** (HISTORY-ONE-1, v1.8.0) at the bottom: every submitted form —
+  timesheets and attendance together, one row each, told apart by a badge —
+  newest submitted first, with its name, dates, submission date and time, and
+  Preview and Download of the PDF stored when it went. Calendar months
+  submitted before PAYROLL-ONE-1 are one row each. Read only: no edit, delete,
+  reopen, withdraw, resubmit or regeneration. The Office sees attendance only.
 - The in-memory demonstration store has no transaction; every check runs
   before the first write there too.
 
@@ -344,17 +425,29 @@ first 92.
   period submitted between Prepare and Send would never have reached Finance
   while the month read "Sent", or a replaced submission would have been sent
   in place of its replacement.
-- A month reads **Sent** only for exactly what the sent package carried; any
-  later submission, replacement or accepted correction makes it **Corrected
-  after it was sent** — selectable again, marked CORRECTED. (Packages sent
-  before v1.5.2 carry no basis; for them it is judged by time, as before.)
+- A month reads **Sent** only for exactly what the sent packages carried. A
+  **further submission** made after it was sent (REPEAT-DATES-1) reads
+  *Further submission since sending*: selectable, and the next package carries
+  ONLY the new submission's files, marked "Additional submission" in the
+  manifest and the email — what Finance already has is never sent again. An
+  accepted correction (or a v1.6.0 replacement) of something already sent makes
+  it **Corrected after it was sent** — re-sent marked CORRECTED, as before.
+  (Packages sent before v1.5.2 carry no basis; for them it is judged by time.)
 - A calendar month submitted before PAYROLL-ONE-1 is sent **as submitted**
   (v1.5.2); before, its attendance was drawn from the register as it stood,
   labelled as an office correction.
-- No day goes to Finance twice: current submissions never share a day (the
-  database refuses it), each ends in exactly one Finance month, a submission
-  already sent to Finance cannot be replaced, and a package that is no longer
-  current is never sent.
+- **No line and no submission goes to Finance twice** (REPEAT-DATES-1): a line
+  is in one submission only (`timesheet_submitted_lines`); each submission
+  belongs to one Finance month (its To); a submission is carried by a sent
+  package once — a later package for the month carries only what no sent
+  package carried (`basis` parts), or re-sends it marked CORRECTED when it was
+  corrected; one package per month is open at a time
+  (`finance_packages_one_open_per_month`), Send claims it in one conditional
+  write and checks the basis again, so two office users, a double click or a
+  retry produce one send. A repeated date alone is not a duplicate. Files of a
+  further submission are named `… ADDITIONAL.pdf` (as corrected ones are
+  `… CORRECTED.pdf`), and the email names any attendance days that are also in
+  an earlier submission.
 
 ## Who may do what
 
@@ -364,11 +457,13 @@ first 92.
 | Own attendance | write | write | write |
 | Complete (and name) a form; Submit to Office | own: both forms | own: both forms | own: attendance only |
 | Withdraw and Correct a completed form (before submission) | own | own | own: attendance |
-| Read a completed form awaiting submission | own | own, and anybody's | own, and anybody's |
+| My Monthly Forms: completed forms, corrections, History (FORMS-OWN-1) | own only | own only | own only — attendance only |
 | Ask for a correction of a submitted timesheet | own | own | — |
 | Accept or reject a correction | — | someone else's | yes |
-| Another person's timesheet, attendance and forms | — | **read only** | **read only** |
+| Another person's SUBMITTED forms (EJE Monthly Forms, `/payroll`) | — | **read only** | **read only** |
+| Another person's completed-but-not-submitted forms, drafts, history | — | — | — |
 | Monthly payroll and the Finance package (prepare, send, discard) | — | yes | yes |
+| Repeated-date review notes | — | yes | yes |
 
 No role writes another person's timesheet or attendance: v1.5.2 closed the
 one gap, the day comment, which the office could write. A technician never
@@ -396,6 +491,18 @@ reads another's forms (refused by the server). Every route checks it on the serv
 - The physical-device checks in `docs/timesheets-physical-test-sheet.md` are
   for a person with the real tablet, phone and printer; everything else is
   automated.
+
+## Database (migration 0056, additive — REPEAT-DATES-1)
+
+| Change | Why |
+|---|---|
+| NEW `timesheet_submitted_lines` (entry_id PK, user_id, work_date, period_id, submitted_at); append-only guard. Backfilled from every stored sent snapshot — each line once, on its current submission (on production, 7 November 2026: 28 lines from 11 sent timesheets, none in two current ones). | the line, not the date, is what is paid once |
+| NEW trigger `record_timesheet_submitted_lines` on `timesheet_periods`: records a timesheet's lines as it is sent; refuses a line already recorded | the database refuses the same line in two submissions |
+| `guard_timesheet_period`, `guard_payroll_submission`: the one-current-per-day checks removed; every write-once rule unchanged | repeated dates allowed |
+| `timesheet_periods_user_range_current_key` → `timesheet_periods_user_range_unsent_key` (one UNSENT row per dates); `payroll_submissions_current_range_key` → plain index | several submissions may have the very same dates |
+
+No existing row is updated or deleted; every snapshot, submission, correction,
+package and PDF stays exactly as stored.
 
 ## Database (migration 0055, additive)
 
@@ -431,6 +538,14 @@ never reads the table, so it runs against it unchanged (CI rollback probe).
 No existing row is updated or deleted by the migration.
 
 ## Recovery
+
+- **Code rollback from v1.8.0 to v1.7.1** (`55e1d06`): nothing of the
+  database is undone (0056 is additive). The limitation, proved by the CI
+  rollback probe: v1.7.1's Submit to Office names the current-range keys 0056
+  replaced in its ON CONFLICT, so it is refused with nothing written until the
+  release is rolled forward; it reads every submission, two with the same
+  dates included, and the line ledger keeps refusing a line in two
+  submissions. Forms completed under v1.7.1 wait, completed, until then.
 
 - **Code rollback from v1.7.1 to v1.7.0** (`38b75cd`): nothing of the database
   is undone (0055 is additive). The limitation, proved by the CI rollback

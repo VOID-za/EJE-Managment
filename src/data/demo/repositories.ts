@@ -1543,7 +1543,9 @@ class DemoAttendanceRepository implements AttendanceRepository {
   findPeriod(userId: UserId, from: string, to: string): Promise<TimesheetPeriod | null> {
     // PAYROLL-ONE-1: a replaced period may share its dates with its replacement; the current one is the one meant.
     const rows = this.context.read().timesheetPeriods.filter((row) => row.userId === userId && row.from === from && row.to === to);
-    return Promise.resolve(rows.find((row) => (row.supersededAt ?? null) === null) ?? rows[0] ?? null);
+    // REPEAT-DATES-1: several sent rows may share the dates — as PostgreSQL orders them: current first, then the latest sent.
+    const ordered = [...rows].sort((x, y) => Number((x.supersededAt ?? null) !== null) - Number((y.supersededAt ?? null) !== null) || (y.submittedAt ?? '').localeCompare(x.submittedAt ?? '') || y.id.localeCompare(x.id));
+    return Promise.resolve(ordered[0] ?? null);
   }
 
   listSubmittedPeriods(userId: UserId, from: string, to: string): Promise<readonly TimesheetPeriod[]> {

@@ -231,7 +231,7 @@ const saveLineHeld = async (
     throw refuse(
       `This line is part of your submitted timesheet for ${formatPeriod(held.period.from, held.period.to)}.`,
       'timesheet_line_submitted',
-      'A submitted timesheet is kept exactly as submitted. To change it, open it under Submitted timesheets on My Monthly Forms and ask for a correction.',
+      'A submitted timesheet is kept exactly as submitted. To change it, open it under Corrections on My Monthly Forms and ask for a correction.',
     );
   }
   const date = input.date === null || input.date === '' ? null : input.date;
@@ -351,7 +351,7 @@ const removeLineHeld = async (
       throw refuse(
         `This line is part of your submitted timesheet for ${formatPeriod(held.period.from, held.period.to)}.`,
         'timesheet_line_submitted',
-        'A submitted timesheet is kept exactly as submitted. To change it, ask for a correction under Submitted timesheets on My Monthly Forms.',
+        'A submitted timesheet is kept exactly as submitted. To change it, ask for a correction under Corrections on My Monthly Forms.',
       );
     }
     await removeTimesheetEntry(context, technicianId, lineId);

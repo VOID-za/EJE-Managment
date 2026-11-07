@@ -635,7 +635,7 @@ export const JobActionBar = ({
       {transferring && (
         <TransferJobDialog
           job={job}
-          technicians={view.users.filter((candidate) => assignableToJobs(candidate.role))}
+          technicians={view.users.filter((candidate) => assignableToJobs(candidate.role) && candidate.active)}
           onClose={() => setTransferring(false)}
           onTransferred={() => {
             setTransferring(false);

@@ -513,7 +513,12 @@ export const prepareFinancePackage = async (
       if (kind !== 'timesheet' && rendered.pageCount !== 1) {
         throw refuse(`${row.technician.name}’s ${kind} is not one page.`, 'form_not_one_page', 'Every payroll form except a timesheet must be exactly one page.');
       }
-      let fileName = correctedResend ? correctedFileName(rendered.fileName) : rendered.fileName;
+      // REPEAT-DATES-1: an additional submission is marked in its file name too, as a CORRECTED one is.
+      let fileName = correctedResend
+        ? correctedFileName(rendered.fileName)
+        : row.status === 'added_after_sent'
+          ? rendered.fileName.replace(/\.pdf$/u, ' ADDITIONAL.pdf')
+          : rendered.fileName;
       // A name a person chose may be another person's too ("Timesheet.pdf"): it is told apart by whose it is.
       if (chosenNames.has(rendered.fileName) && attachments.some((attachment) => attachment.fileName.toLowerCase() === fileName.toLowerCase())) {
         fileName = `${row.technician.name} - ${fileName}`;
@@ -545,7 +550,11 @@ export const prepareFinancePackage = async (
         sha256: await sha256Hex(rendered.bytes),
         sizeBytes: rendered.bytes.byteLength,
         pageCount: rendered.pageCount,
-        versionLabel: row.status === 'added_after_sent' ? `Additional submission — ${versionLabel}` : versionLabel,
+        versionLabel: `${row.status === 'added_after_sent' ? `Additional submission — ${versionLabel}` : versionLabel}${
+          kind === 'attendance' && row.repeatedDates.length > 0
+            ? ` — days also in an earlier submission: ${[...new Set(row.repeatedDates.map((repeat) => repeat.label))].join('; ')}`
+            : ''
+        }`,
         correctedResend,
         basis,
       });
@@ -592,8 +601,12 @@ const packageEmail = (financePackage: FinancePackage): { subject: string; body: 
       `${financePackage.attachments.length} attachments. Package reference ${financePackage.id}.`,
       corrected ? 'Files marked CORRECTED replace the versions sent earlier for those technicians.' : '',
       financePackage.attachments.some((attachment) => attachment.versionLabel.startsWith('Additional submission'))
-        ? 'Some files are an ADDITIONAL submission, made after an earlier package: they are in addition to what was sent before, never instead of it, and nothing sent before is in them again.'
+        ? 'Files marked ADDITIONAL are a further submission, made after an earlier package: they are in addition to what was sent before, never instead of it, and no timesheet line sent before is in them again.'
         : '',
+      // REPEAT-DATES-1: attendance days that are also in an earlier submission are named, so they are not counted twice.
+      ...financePackage.attachments
+        .filter((attachment) => attachment.versionLabel.includes('days also in an earlier submission'))
+        .map((attachment) => `Review: ${attachment.technicianName}, ${attachment.fileName} — ${attachment.versionLabel.slice(attachment.versionLabel.indexOf('days also'))}; their attendance appears in both submissions.`),
     ].filter((line, index, all) => !(line === '' && all[index - 1] === '')).join('\n'),
   };
 };

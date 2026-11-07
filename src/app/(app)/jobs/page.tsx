@@ -1,6 +1,6 @@
 'use client';
 
-import { isFieldRole } from '@/domain';
+import { assignableToJobs } from '@/domain';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useMemo, useState } from 'react';
@@ -186,7 +186,8 @@ const JobsPageContent = () => {
   // The server refuses `jobs.create` to a technician; the button follows it (the tester, 30 October 2026).
   const canCreate = can(user.role, 'jobs.create');
   // MY JOBS: a technician's own work as a button (the tester, 30 October 2026) — the "assigned to me" filter.
-  const offerMyJobs = isFieldRole(user.role);
+  // JOB-ASSIGN-ST-1: a Senior Tech can be assigned jobs too, so has the same "assigned to me" filter.
+  const offerMyJobs = assignableToJobs(user.role);
   const myJobsCount = visible.filter(
     (row) => row.job.primaryTechnicianId === user.id || row.job.additionalTechnicianIds.includes(user.id),
   ).length;

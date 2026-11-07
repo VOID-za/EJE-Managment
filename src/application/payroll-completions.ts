@@ -371,7 +371,17 @@ const checkCompletion = async (context: OperationContext, technicianId: string, 
    * REPEAT-DATES-1 (the owner, 7 November 2026): dates already in a submitted form are allowed. The new form is its
    * own submission; its timesheet carries only the OPEN lines (`openEntries`), never one already submitted, and the
    * earlier submission is never touched. Said to the person and to the office (`repeats`), never refused.
+   *
+   * Except for a person who keeps NO timesheet (the Office): the repeat rule is about work lines, and attendance alone
+   * has none — the same days' attendance submitted again would only reach Finance twice. Refused, naming it.
    */
+  if (kind === 'attendance' && !timesheetRequired && state.repeats.length > 0) {
+    add(
+      'attendance_already_submitted',
+      `Your attendance for ${state.repeats.map((overlap) => overlap.label.replace(/^forms /u, '')).join('; ')} was already submitted to the office.`,
+      'Attendance is submitted once for a day. Choose dates after it, or ask the office if it needs correcting.',
+    );
+  }
   // Only lines IN these dates: a draft with no date belongs to no form yet.
   const incomplete = (state.timesheet?.incomplete ?? []).filter((line) => line.date !== null);
   if (kind === 'timesheet' && incomplete.length > 0) {

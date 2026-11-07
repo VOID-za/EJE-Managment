@@ -4629,7 +4629,11 @@ await step('My Monthly Forms previews, prints, downloads, exports and submits th
     if ((await officeCard.getByTestId('monthly-forms-edit').count()) !== 0) throw new Error(`${who} was offered editing a technician’s forms`);
     // CSV-OFF-2 (2 November 2026): no Export CSV on Monthly Forms.
     if ((await page.getByTestId('attendance-export').count()) !== 0) throw new Error(`${who} still sees the attendance CSV export`);
-    if ((await page.getByRole('button', { name: 'Export CSV' }).count()) !== 0) throw new Error(`${who} still sees Export CSV on Monthly Forms`);
+    // CSV-OFF-2 is about the month (the package and a person's forms). The submitted-timesheets list below them
+    // (FORMS-OWN-1 moved it here from My Monthly Forms) keeps each submission's lines export, as it had there.
+    for (const area of ['finance-package', 'monthly-forms']) {
+      if ((await page.getByTestId(area).getByRole('button', { name: 'Export CSV' }).count()) !== 0) throw new Error(`${who} still sees Export CSV on Monthly Forms`);
+    }
   }
 
   // Another technician sees only their own month, and is refused Naledi's.

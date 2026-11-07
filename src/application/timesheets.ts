@@ -395,7 +395,7 @@ const assertMayLeave = async (context: OperationContext, technicianId: UserId, e
     throw refuse(
       'This line is part of a timesheet submitted to the office.',
       'timesheet_line_submitted',
-      'A submitted timesheet is kept exactly as submitted. To change it, ask for a correction under Submitted timesheets on My Monthly Forms.',
+      'A submitted timesheet is kept exactly as submitted. To change it, ask for a correction under Corrections on My Monthly Forms.',
     );
   }
   await assertDatesOpen(context, technicianId, 'timesheet', [entry.date], { leaving: true });

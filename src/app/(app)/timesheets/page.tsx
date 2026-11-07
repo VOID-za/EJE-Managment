@@ -267,7 +267,7 @@ const TimesheetsPage = () => {
       {!keeps && (
         <p role="status" className="mb-4 text-sm text-steel-600" data-testid="timesheet-not-required">
           The Office does not complete a timesheet — only attendance. Everybody&apos;s submitted timesheets are on{' '}
-          <a href="/payroll/mine" className="font-medium text-eje-700 underline">My Monthly Forms</a>.
+          <a href="/payroll" className="font-medium text-eje-700 underline">EJE Monthly Forms</a>.
         </p>
       )}
 

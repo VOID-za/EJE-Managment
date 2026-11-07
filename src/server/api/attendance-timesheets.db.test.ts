@@ -258,8 +258,8 @@ describeDb('attendance and timesheets on PostgreSQL', () => {
     expect((await tech.post(`/api/timesheets/${IDS.technician}/working/comment`, { comment: 'Workshop days.' })).status).toBe(200);
     const sent = await submitForms(tech, IDS.technician, from, today);
     expect(sent.status, JSON.stringify(sent.error)).toBe(200);
-    // The same dates again are refused unless the replacement is confirmed — a submission is never overwritten.
-    expect((await submitForms(tech, IDS.technician, from, today)).status).toBe(422);
+    // Submit to Office again with nothing newly completed: refused — a submission is never made twice or overwritten.
+    expect((await tech.post(`/api/payroll/forms/${IDS.technician}/submit`, {})).error?.violations[0]?.code).toBe('payroll_already_submitted');
     // The open sheet's comment went into the snapshot and is cleared for the next sheet (migration 0050).
     const [working] = await db.select().from(schema.timesheetWorkingComments).where(eq(schema.timesheetWorkingComments.userId, IDS.technician));
     expect(working?.comment).toBe('');

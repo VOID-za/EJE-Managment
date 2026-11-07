@@ -99,7 +99,7 @@ export const assertDatesOpen = async (
           `Your ${form} for ${formatPeriod(locked.from, locked.to)} was submitted to the office, so ${date} cannot be changed.`,
           'form_submitted',
           kind === 'timesheet'
-            ? 'A submitted timesheet is read-only. To change it, ask for a correction under Submitted timesheets on My Monthly Forms.'
+            ? 'A submitted timesheet is read-only. To change it, ask for a correction under Corrections on My Monthly Forms.'
             : 'Submitted attendance is read-only.',
         );
   }
