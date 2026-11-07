@@ -1,6 +1,7 @@
 import { customerPricingInputs } from './customer-rates';
 import { createZip, uniqueEntryNames, type ZipEntry } from '@/lib/zip';
 import {
+  assignableToJobs,
   can,
   offersSiteLocation,
   isIssuedStatus,
@@ -326,7 +327,7 @@ const assertAssignable = async (
       { code: 'user_inactive', message: 'A disabled account cannot be given work.' },
     ]);
   }
-  if (!can(target.role, 'jobs.acceptField')) {
+  if (!assignableToJobs(target.role)) {
     throw new WorkflowError(`${userFullName(target)} does not carry out field work.`, [
       {
         code: 'not_a_field_technician',
@@ -4255,7 +4256,7 @@ export const transferJobToTechnician = async (
   }
   // A transfer hands the field work on, so the receiver has to be someone who
   // does field work — the same rule as an assignment.
-  if (!can(receiving.role, 'jobs.acceptField')) {
+  if (!assignableToJobs(receiving.role)) {
     throw new WorkflowError(`${userFullName(receiving)} does not carry out field work.`, [
       {
         code: 'not_a_field_technician',

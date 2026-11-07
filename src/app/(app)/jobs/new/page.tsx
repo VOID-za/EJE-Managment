@@ -1,11 +1,10 @@
 'use client';
 
-import { isFieldRole } from '@/domain';
+import { isAssignableTechnician } from '@/domain';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import {
   checkSchedule,
-  daysBetween,
   can,
   contactFullName,
   dateReceivedProblem,
@@ -40,6 +39,7 @@ import { jobs as api, reads } from '@/api/endpoints';
 import { useQuery } from '@/hooks/useQuery';
 import { useCurrentUser } from '@/providers/AppProvider';
 import { RuleViolationNotice } from '@/components/jobs/RuleViolationNotice';
+import { JobScheduleDates } from '@/components/jobs/JobScheduleDates';
 import { useOperation } from '@/hooks/useOperation';
 import { RepairItemsEditor, emptyRepairItemDraft, repairDraftsValid, repairItemsFromDrafts, type RepairItemDraft } from '@/components/jobs/RepairItemsEditor';
 import {
@@ -157,9 +157,9 @@ const NewJobPage = () => {
     [data?.machines, siteId],
   );
   const selectedSite = sites.find((site) => site.id === siteId) ?? null;
-  /** Who may be given field work. The same rule the server enforces. */
+  /** Who may be given field work — a Senior Tech too (JOB-ASSIGN-ST-1). The same rule the server enforces. */
   const fieldTechnicians = useMemo(
-    () => (data?.users ?? []).filter((user) => isFieldRole(user.role) && user.active),
+    () => (data?.users ?? []).filter(isAssignableTechnician),
     [data?.users],
   );
 
@@ -621,7 +621,7 @@ const NewJobPage = () => {
                 className={
                   definition.officeProcessed
                     ? 'grid grid-cols-1 gap-4'
-                    : 'grid grid-cols-1 gap-4 sm:grid-cols-3'
+                    : 'grid grid-cols-1 gap-4 sm:grid-cols-2'
                 }
               >
                 <SelectField
@@ -727,45 +727,20 @@ const NewJobPage = () => {
                         })),
                       ]}
                     />
-                    <TextField
-                      label={
-                        definition.schedulesDateRange ? 'Scheduled start date' : 'Scheduled date'
-                      }
-                      type="date"
-                      value={scheduledDate}
-                      onChange={(event) => setScheduledDate(event.target.value)}
-                    />
                   </>
                 )}
               </div>
 
-              {definition.schedulesDateRange && (
-                <div className="grid grid-cols-1 gap-4 rounded-[var(--radius-control)] border border-eje-200 bg-eje-50 p-4 sm:grid-cols-2">
-                  <TextField
-                    label="Scheduled end date"
-                    type="date"
-                    value={scheduledEndDate}
-                    min={scheduledDate.length > 0 ? scheduledDate : undefined}
-                    onChange={(event) => setScheduledEndDate(event.target.value)}
-                    error={errors.scheduledEndDate}
-                    hint="A service is quoted for a number of days and is booked across a range."
-                  />
-                  <div className="flex items-end pb-1">
-                    <p className="text-sm text-eje-800">
-                      {scheduledDate.length > 0 && scheduledEndDate.length > 0 ? (
-                        <>
-                          Booked for{' '}
-                          <span className="font-semibold">
-                            {daysBetween(scheduledDate, scheduledEndDate) + 1} days
-                          </span>{' '}
-                          on the calendar.
-                        </>
-                      ) : (
-                        'Leave the end date blank for a single-day service.'
-                      )}
-                    </p>
-                  </div>
-                </div>
+              {/* JOB-DATES-UI-1: start and end as one "Dates" section — one control, one style. */}
+              {!definition.officeProcessed && (
+                <JobScheduleDates
+                  range={definition.schedulesDateRange}
+                  start={scheduledDate}
+                  end={scheduledEndDate}
+                  onStartChange={setScheduledDate}
+                  onEndChange={setScheduledEndDate}
+                  endError={errors.scheduledEndDate}
+                />
               )}
 
               {/*

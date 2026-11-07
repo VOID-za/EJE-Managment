@@ -1,4 +1,4 @@
-import type { UserRole } from './types/user';
+import type { User, UserRole } from './types/user';
 
 /**
  * Capability-based access rules.
@@ -598,3 +598,22 @@ export const can = (role: UserRole, capability: Capability): boolean =>
  */
 export const completesTimesheet = (role: UserRole): boolean =>
   role === 'master' || role === 'technician' || role === 'apprentice';
+
+/**
+ * WHO A JOB MAY BE GIVEN TO. JOB-ASSIGN-ST-1 (7 November 2026).
+ *
+ * A Technician, an Apprentice or a Senior Tech — whoever attends machines,
+ * which is `jobs.acceptField` and nothing new. The Senior Tech has always held
+ * it (he may accept, work and submit a job he is on); what was missing was the
+ * screens, which offered `isFieldRole` and so never listed him. Office
+ * (Coordinator) is never assignable.
+ *
+ * ONE RULE, ASKED BY BOTH SIDES: the server's checks at creation, assignment
+ * and transfer, and every picker and technician filter on the screens, so the
+ * list a person chooses from cannot drift from the list the server accepts.
+ */
+export const assignableToJobs = (role: UserRole): boolean => can(role, 'jobs.acceptField');
+
+/** `assignableToJobs`, and still working here. A disabled account is given no work. */
+export const isAssignableTechnician = (user: Pick<User, 'role' | 'active'>): boolean =>
+  user.active && assignableToJobs(user.role);

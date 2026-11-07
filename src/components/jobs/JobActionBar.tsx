@@ -1,6 +1,6 @@
 'use client';
 
-import { isFieldRole } from '@/domain';
+import { assignableToJobs } from '@/domain';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import {
@@ -635,7 +635,7 @@ export const JobActionBar = ({
       {transferring && (
         <TransferJobDialog
           job={job}
-          technicians={view.users.filter((candidate) => isFieldRole(candidate.role))}
+          technicians={view.users.filter((candidate) => assignableToJobs(candidate.role))}
           onClose={() => setTransferring(false)}
           onTransferred={() => {
             setTransferring(false);

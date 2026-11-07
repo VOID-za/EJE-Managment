@@ -1,6 +1,6 @@
 'use client';
 
-import { isFieldRole } from '@/domain';
+import { isAssignableTechnician } from '@/domain';
 import { useState } from 'react';
 import {
   can,
@@ -75,7 +75,7 @@ export const JobOverviewPanel = ({
   const canEditDetails = can(currentUser.role, 'jobs.editDetails') && editable;
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [partsOpen, setPartsOpen] = useState(false);
-  const technicians = users.filter((user) => isFieldRole(user.role) && user.active);
+  const technicians = users.filter(isAssignableTechnician);
 
   const overdue =
     isOverdue(job.scheduledDate) && !isFinishedStatus(job.status) && !isIssuedStatus(job.status);

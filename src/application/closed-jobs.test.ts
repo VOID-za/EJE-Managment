@@ -288,7 +288,12 @@ describe('narrowing the archive with filters', () => {
     const page = await loadClosedJobs(harness.repos, master, filters());
     expect(page.customers.length).toBeGreaterThan(0);
     expect(page.sites.some((site) => site.customerId === 'cust-abc')).toBe(true);
-    expect(page.technicians.every((user) => user.role === 'technician')).toBe(true);
+    // JOB-ASSIGN-ST-1: a Senior Tech can be on a job, so he is a filter; the Office is not.
+    expect(
+      page.technicians.every((user) => ['technician', 'apprentice', 'master'].includes(user.role)),
+    ).toBe(true);
+    expect(page.technicians.some((user) => user.role === 'master')).toBe(true);
+    expect(page.technicians.some((user) => user.role === 'coordinator')).toBe(false);
     // Sites carry their customer so the screen can narrow one by the other.
     expect(page.sites.every((site) => site.customerId.length > 0)).toBe(true);
   });

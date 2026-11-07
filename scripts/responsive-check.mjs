@@ -311,6 +311,36 @@ for (const viewport of VIEWPORTS) {
       return measure(viewport);
     });
   }
+
+  /*
+   * JOB-DATES-UI-1: a service's start and end dates are one "Dates" section —
+   * the same control, the same height, side by side from 640px and stacked on
+   * a phone, and nothing wider than the screen.
+   */
+  await step(`the job's Dates section at ${viewport.name}`, async () => {
+    await visit('/jobs/new');
+    await page.getByLabel('Job type').selectOption('service');
+    const section = page.getByTestId('job-schedule-dates');
+    await section.waitFor({ timeout: 8000 });
+    const found = await section.evaluate((node, width) => {
+      const problems = [];
+      const fields = [...node.querySelectorAll('input[type="date"]')];
+      if (fields.length !== 2) return [`the Dates section holds ${fields.length} date inputs, not 2`];
+      const [start, end] = fields.map((field) => field.getBoundingClientRect());
+      if (fields[0].className !== fields[1].className) problems.push('start and end dates are styled differently');
+      if (Math.abs(start.height - end.height) > 0.5) problems.push(`heights differ: ${start.height} and ${end.height}`);
+      if (start.height < 44) problems.push(`a date input is ${start.height}px tall, under 44px`);
+      const sideBySide = Math.abs(start.top - end.top) < 1 && end.left >= start.right;
+      const stacked = end.top >= start.bottom && Math.abs(start.left - end.left) < 1;
+      if (width >= 640 && !sideBySide) problems.push('start and end are not side by side');
+      if (width < 640 && !stacked) problems.push('start and end are not stacked on a phone');
+      for (const box of [start, end]) {
+        if (box.right > width + 1 || box.left < -1) problems.push('a date input runs off the screen');
+      }
+      return problems;
+    }, viewport.width);
+    return [...found, ...(await measure(viewport))];
+  });
 }
 
 /* -------------------------------------------------------------------------- */

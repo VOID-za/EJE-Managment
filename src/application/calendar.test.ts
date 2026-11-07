@@ -162,7 +162,14 @@ describe('loadCalendar', () => {
   it('returns the active technicians for filtering', async () => {
     const data = await loadCalendar(buildRepos(), wideRange, office);
     expect(data.technicians.length).toBeGreaterThan(0);
-    expect(data.technicians.every((user) => user.role === 'technician' && user.active)).toBe(true);
+    // JOB-ASSIGN-ST-1: whoever a job may be given to — a Senior Tech too, the Office never.
+    expect(
+      data.technicians.every(
+        (user) => ['technician', 'apprentice', 'master'].includes(user.role) && user.active,
+      ),
+    ).toBe(true);
+    expect(data.technicians.some((user) => user.role === 'master')).toBe(true);
+    expect(data.technicians.some((user) => user.role === 'coordinator')).toBe(false);
   });
 
   it('sorts longest entries first so bars pack cleanly', async () => {

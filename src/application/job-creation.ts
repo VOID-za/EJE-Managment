@@ -1,5 +1,6 @@
 import {
   asJobId,
+  assignableToJobs,
   can,
   contactFullName,
   dateReceivedProblem,
@@ -277,7 +278,7 @@ const resolveTechnicians = async (
         { code: 'user_inactive', message: 'Choose a technician who is still working here.' },
       ]);
     }
-    if (!can(person.role, 'jobs.acceptField')) {
+    if (!assignableToJobs(person.role)) {
       throw new WorkflowError(`${userFullName(person)} does not carry out field work.`, [
         {
           code: 'not_a_field_technician',
